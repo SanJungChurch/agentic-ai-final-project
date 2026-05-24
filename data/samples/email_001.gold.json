@@ -1,0 +1,36 @@
+{
+  "intent": "schedule_meeting",
+  "participants": ["동욱", "정인", "민수"],
+  "candidate_times": [
+    {
+      "participant": "동욱",
+      "expression": "화요일 오후 3시 이후",
+      "availability": "available"
+    },
+    {
+      "participant": "정인",
+      "expression": "수요일 5시",
+      "availability": "available"
+    },
+    {
+      "participant": "정인",
+      "expression": "목요일 오전",
+      "availability": "available"
+    },
+    {
+      "participant": "민수",
+      "expression": "수요일 5시",
+      "availability": "available"
+    }
+  ],
+  "unavailable_times": [
+    {
+      "participant": "민수",
+      "expression": "목요일",
+      "availability": "unavailable"
+    }
+  ],
+  "location_preference": "숭실대 근처 카페",
+  "meeting_duration_minutes": null,
+  "gold_best_time": "수요일 17:00"
+}
