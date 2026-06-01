@@ -24,6 +24,7 @@ Email Input
 -> Constraint Extraction
 -> Calendar Conflict Check
 -> Time Optimization
+-> Reply Draft Generation
 -> Place Decision
 -> GUI Reservation
 -> Reflection / Replanning
@@ -49,7 +50,10 @@ agentic/
 ├─ data/
 │  ├─ benchmarks/
 │  │  └─ week1_event_extraction.jsonl
+│  ├─ calendars/
+│  │  └─ synthetic_calendar_001.json
 │  └─ samples/
+│     ├─ extraction_001.normalized.json
 │     ├─ email_001.txt
 │     └─ email_001.gold.json
 ├─ prompts/
@@ -61,6 +65,7 @@ agentic/
 │     ├─ llm_extractor.py
 │     ├─ graph.py
 │     ├─ run_graph.py
+│     ├─ scheduling.py
 │     ├─ evaluate.py
 │     └─ schema.py
 ├─ tests/
@@ -124,6 +129,44 @@ python -m src.email_agent.run_graph --sample data\samples\email_001.txt --refere
 
 Gemini API 키가 없거나 LLM 호출이 실패하면 자동으로 rule-based fallback이 실행됩니다.
 
+Calendar 파일까지 연결해 scheduling node를 함께 실행할 수도 있습니다.
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json
+```
+
+정적 HTML 검색 결과를 BeautifulSoup provider로 파싱해 장소 후보까지 연결할 수 있습니다.
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider html --place-search-html data\place_search\soongsil_cafes.html
+```
+
+Kakao Local API 키가 `.env`에 있으면 실제 장소 검색 provider도 사용할 수 있습니다.
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider kakao
+```
+
+Graph workflow는 extraction 이후 `normalize_times` node를 통해 자연어 시간 표현을 ISO datetime으로 변환한 뒤 calendar judge와 optimizer를 실행합니다.
+
+Time normalizer만 단독으로 실행할 수도 있습니다.
+
+```bat
+python -m src.email_agent.time_normalizer --extraction data\samples\extraction_001.normalized.json --reference-date 2026-05-27
+```
+
+Place retriever만 단독으로 실행할 수도 있습니다.
+
+```bat
+python -m src.email_agent.place_retriever --extraction data\samples\email_001.gold.json --provider html --html data\place_search\soongsil_cafes.html
+```
+
+Kakao provider 단독 실행:
+
+```bat
+python -m src.email_agent.place_retriever --extraction data\samples\email_001.gold.json --provider kakao
+```
+
 평가 실행:
 
 ```bat
@@ -134,6 +177,36 @@ python -m src.email_agent.evaluate --sample data\samples\email_001.txt --gold da
 
 ```bat
 python -m src.email_agent.benchmark --benchmark data\benchmarks\week1_event_extraction.jsonl
+```
+
+Gemini API로 작은 benchmark subset을 직접 평가:
+
+```bat
+python -m src.email_agent.llm_benchmark --benchmark data\benchmarks\week1_event_extraction.jsonl --limit 10 --reference-date 2026-05-26 --output reports\gemini_week1_eval.json
+```
+
+로컬 MailEx 원본 데이터셋을 직접 사용해 Gemini 평가:
+
+```bat
+python -m src.email_agent.llm_benchmark --mailex-root dataset\data --split test --limit 10 --reference-date 2026-05-26 --output reports\gemini_mailex_test_10_eval.json
+```
+
+KVRET calendar scheduling subset을 직접 사용해 Gemini 평가:
+
+```bat
+python -m src.email_agent.llm_benchmark --kvret-root dataset\kvret --split test --limit 10 --reference-date 2026-05-27 --output reports\gemini_kvret_test_10_eval.json
+```
+
+KVRET만 반복 평가할 때는 아래 파일의 상단 설정값을 바꾼 뒤 실행합니다.
+
+```bat
+python scripts\run_kvret_eval.py
+```
+
+2주차 calendar judge + time optimizer 실행:
+
+```bat
+python -m src.email_agent.scheduling --extraction data\samples\extraction_001.normalized.json --calendar data\calendars\synthetic_calendar_001.json
 ```
 
 테스트 실행:

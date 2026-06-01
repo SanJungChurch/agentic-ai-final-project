@@ -4,3 +4,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ipynb_checkpoints/
+reports/
+dataset/
+data.zip
+Desktop/
+Desktop.7z
+kvret_final_repro_files.zip

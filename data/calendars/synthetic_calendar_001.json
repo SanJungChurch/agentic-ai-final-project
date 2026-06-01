@@ -1,0 +1,32 @@
+{
+  "timezone": "Asia/Seoul",
+  "allowed_hours": {
+    "start": "09:00",
+    "end": "22:00"
+  },
+  "default_duration_minutes": 60,
+  "participants": ["동욱", "정인", "민수"],
+  "busy_events": [
+    {
+      "participant": "동욱",
+      "start": "2026-05-27T15:00:00+09:00",
+      "end": "2026-05-27T16:00:00+09:00",
+      "title": "연구실 세미나",
+      "location": "숭실대"
+    },
+    {
+      "participant": "정인",
+      "start": "2026-05-28T10:00:00+09:00",
+      "end": "2026-05-28T12:00:00+09:00",
+      "title": "수업",
+      "location": "숭실대"
+    },
+    {
+      "participant": "민수",
+      "start": "2026-05-27T18:00:00+09:00",
+      "end": "2026-05-27T19:00:00+09:00",
+      "title": "개인 일정",
+      "location": null
+    }
+  ]
+}

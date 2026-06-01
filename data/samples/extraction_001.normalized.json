@@ -1,0 +1,48 @@
+{
+  "intent": "schedule_meeting",
+  "participants": ["동욱", "정인", "민수"],
+  "candidate_times": [
+    {
+      "participant": "동욱",
+      "expression": "수요일 17시",
+      "normalized_start": "2026-05-27T17:00:00+09:00",
+      "normalized_end": "2026-05-27T18:00:00+09:00",
+      "availability": "available"
+    },
+    {
+      "participant": "정인",
+      "expression": "수요일 17시",
+      "normalized_start": "2026-05-27T17:00:00+09:00",
+      "normalized_end": "2026-05-27T18:00:00+09:00",
+      "availability": "available"
+    },
+    {
+      "participant": "민수",
+      "expression": "수요일 17시",
+      "normalized_start": "2026-05-27T17:00:00+09:00",
+      "normalized_end": "2026-05-27T18:00:00+09:00",
+      "availability": "available"
+    },
+    {
+      "participant": "정인",
+      "expression": "목요일 오전 10시",
+      "normalized_start": "2026-05-28T10:00:00+09:00",
+      "normalized_end": "2026-05-28T11:00:00+09:00",
+      "availability": "available"
+    }
+  ],
+  "unavailable_times": [
+    {
+      "participant": "민수",
+      "expression": "목요일",
+      "normalized_start": "2026-05-28T00:00:00+09:00",
+      "normalized_end": "2026-05-29T00:00:00+09:00",
+      "availability": "unavailable"
+    }
+  ],
+  "location_preference": "숭실대 근처 카페",
+  "meeting_duration_minutes": 60,
+  "missing_information": [],
+  "confidence": 0.9,
+  "source_summary": "수요일 17시가 공통 후보이며 목요일은 민수가 어렵다."
+}
