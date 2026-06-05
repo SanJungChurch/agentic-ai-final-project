@@ -147,6 +147,73 @@ Kakao Local API 키가 `.env`에 있으면 실제 장소 검색 provider도 사�
 python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider kakao
 ```
 
+Mock reservation page까지 연결한 Week 3 workflow 실행:
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider html --place-search-html data\place_search\soongsil_cafes.html --reservation-provider html --reservation-html data\reservation\mock_reservation.html
+```
+
+ShowUI executor adapter 실행:
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider html --place-search-html data\place_search\soongsil_cafes.html --reservation-provider showui --reservation-target file:///C:/VSProject/agentic/data/reservation/mock_reservation.html
+```
+
+`SHOWUI_RUNNER_COMMAND`가 설정되어 있으면 ShowUI runner에 task JSON을 전달합니다. 설정되어 있지 않으면 `needs_manual_action` 상태와 함께 ShowUI에 전달할 예약 task prompt를 반환합니다.
+
+ShowUI runner script 설정 예시:
+
+```bat
+set SHOWUI_RUNNER_COMMAND=python scripts\showui_reservation_runner.py --headless --dom-fallback
+```
+
+공식 ShowUI repo는 로컬 개발 편의를 위해 `third_party\ShowUI`에 clone해둘 수 있습니다. 이 폴더는 `.gitignore`에 포함되어 public repo에는 업로드하지 않습니다.
+
+```bat
+mkdir third_party
+git clone https://github.com/showlab/ShowUI.git third_party\ShowUI
+```
+
+실제 ShowUI Hugging Face Space 또는 로컬 Gradio source를 사용할 경우:
+
+```bat
+set SHOWUI_GRADIO_SOURCE=showlab/ShowUI
+set SHOWUI_RUNNER_COMMAND=python scripts\showui_reservation_runner.py --headless
+```
+
+로컬 ShowUI Gradio를 직접 띄우는 경우 `SHOWUI_GRADIO_SOURCE=http://127.0.0.1:7860`처럼 바꾸면 됩니다.
+
+처음 실행 전 Playwright browser 설치가 필요합니다.
+
+```bat
+python -m playwright install chromium
+```
+
+Local GPU ShowUI-2B 실행을 위해서는 CUDA PyTorch를 먼저 설치합니다.
+
+```bat
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install transformers accelerate qwen-vl-utils safetensors
+```
+
+Local GPU ShowUI-2B end-to-end demo:
+
+```bat
+python scripts\run_showui_e2e_demo.py --local-showui
+```
+
+직접 runner command를 지정하려면:
+
+```bat
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23 --calendar data\calendars\synthetic_calendar_001.json --place-provider html --place-search-html data\place_search\soongsil_cafes.html --reservation-provider showui --reservation-target file:///C:/VSProject/agentic/data/reservation/mock_reservation.html --showui-runner-command "python scripts\showui_reservation_runner.py --headless --showui-source local"
+```
+
+End-to-end ShowUI demo 실행:
+
+```bat
+python scripts\run_showui_e2e_demo.py
+```
+
 Graph workflow는 extraction 이후 `normalize_times` node를 통해 자연어 시간 표현을 ISO datetime으로 변환한 뒤 calendar judge와 optimizer를 실행합니다.
 
 Time normalizer만 단독으로 실행할 수도 있습니다.
@@ -165,6 +232,18 @@ Kakao provider 단독 실행:
 
 ```bat
 python -m src.email_agent.place_retriever --extraction data\samples\email_001.gold.json --provider kakao
+```
+
+Reservation executor만 단독으로 실행할 수도 있습니다. `--recommendation`과 `--place-recommendation`에는 graph나 단독 모듈 실행 결과 JSON을 넣으면 됩니다.
+
+```bat
+python -m src.email_agent.reservation_executor --extraction data\samples\email_001.gold.json --recommendation reports\sample_recommendation.json --place-recommendation reports\sample_place_recommendation.json --reservation-provider html --reservation-html data\reservation\mock_reservation.html
+```
+
+ShowUI executor 단독 실행:
+
+```bat
+python -m src.email_agent.reservation_executor --extraction data\samples\email_001.gold.json --recommendation reports\sample_recommendation.json --place-recommendation reports\sample_place_recommendation.json --reservation-provider showui --reservation-target file:///C:/VSProject/agentic/data/reservation/mock_reservation.html
 ```
 
 평가 실행:

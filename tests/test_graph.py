@@ -41,6 +41,7 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(result["provider"], "rule_fallback")
         self.assertEqual(result["recommendation"].status, "selected")
         self.assertEqual(result["place_recommendation"].status, "selected")
+        self.assertEqual(result["reservation_result"].status, "confirmed")
         self.assertEqual(result["reply_draft"].status, "ready")
         self.assertEqual(
             result["recommendation"].selected.candidate.start,

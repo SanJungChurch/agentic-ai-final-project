@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .schema import ExtractionResult, PlaceRecommendation, ReplyDraft, ScheduleRecommendation
+from .schema import ExtractionResult, PlaceRecommendation, ReplyDraft, ReservationResult, ScheduleRecommendation
 
 
 def generate_reply_draft(
@@ -14,6 +14,7 @@ def generate_reply_draft(
     recommendation: ScheduleRecommendation | None,
     *,
     place_recommendation: PlaceRecommendation | None = None,
+    reservation_result: ReservationResult | None = None,
     timezone: str = "Asia/Seoul",
 ) -> ReplyDraft:
     if not recommendation or recommendation.status == "missing_candidate_times":
@@ -47,6 +48,7 @@ def generate_reply_draft(
     time_text = _format_time_range(candidate.start, candidate.end, timezone)
     participants = _format_participants(extraction.participants)
     location_line = _location_line(extraction.location_preference, place_recommendation)
+    reservation_line = _reservation_line(reservation_result)
     reason_text = _reason_sentence(selected.reasons)
 
     body = (
@@ -58,6 +60,8 @@ def generate_reply_draft(
         body += f"\n참석자는 {participants} 기준으로 확인했습니다."
     if location_line:
         body += f"\n{location_line}"
+    if reservation_line:
+        body += f"\n{reservation_line}"
 
     body += "\n\n이 시간으로 진행해도 괜찮을까요?\n\n감사합니다."
 
@@ -122,6 +126,20 @@ def _reason_sentence(reasons: list[str]) -> str:
     if not reasons:
         return "캘린더 충돌 여부를 기준으로 선택했습니다."
     return " ".join(reason.rstrip(".") + "." for reason in reasons[:2])
+
+
+def _reservation_line(reservation_result: ReservationResult | None) -> str:
+    if not reservation_result:
+        return ""
+    if reservation_result.status == "confirmed":
+        confirmation = f" 예약번호는 {reservation_result.confirmation_id}입니다." if reservation_result.confirmation_id else ""
+        return f"예약 페이지에서 해당 시간 예약을 확인했습니다.{confirmation}"
+    if reservation_result.status == "failed":
+        reason = f" ({reservation_result.failure_reason})" if reservation_result.failure_reason else ""
+        return f"예약 시도는 실패했습니다{reason}. 다른 장소나 시간을 다시 확인해야 합니다."
+    if reservation_result.status == "needs_manual_action":
+        return "예약 페이지에서 추가 수동 확인이 필요합니다."
+    return ""
 
 
 def main() -> None:

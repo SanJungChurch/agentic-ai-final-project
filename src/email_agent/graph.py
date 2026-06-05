@@ -5,8 +5,16 @@ from typing import Literal, TypedDict
 from .extractor import extract_constraints, parse_email_thread
 from .llm_extractor import GeminiConstraintExtractor
 from .place_retriever import provider_from_name, recommend_place
+from .reservation_executor import executor_from_name, reserve_selected_place
 from .reply_generator import generate_reply_draft
-from .schema import EmailThread, ExtractionResult, PlaceRecommendation, ReplyDraft, ScheduleRecommendation
+from .schema import (
+    EmailThread,
+    ExtractionResult,
+    PlaceRecommendation,
+    ReplyDraft,
+    ReservationResult,
+    ScheduleRecommendation,
+)
 from .scheduling import load_calendar, recommend_time
 from .time_normalizer import normalize_extraction_times
 
@@ -18,10 +26,15 @@ class ExtractionGraphState(TypedDict, total=False):
     calendar_path: str | None
     place_provider: str | None
     place_search_html: str | None
+    reservation_provider: str | None
+    reservation_html: str | None
+    reservation_target: str | None
+    showui_runner_command: str | None
     thread: EmailThread
     extraction: ExtractionResult
     recommendation: ScheduleRecommendation
     place_recommendation: PlaceRecommendation
+    reservation_result: ReservationResult
     reply_draft: ReplyDraft
     provider: str
     error: str
@@ -41,6 +54,7 @@ def build_extraction_graph():
     graph.add_node("normalize_times", normalize_times_node)
     graph.add_node("schedule", schedule_node)
     graph.add_node("retrieve_places", retrieve_places_node)
+    graph.add_node("reserve_place", reserve_place_node)
     graph.add_node("generate_reply", generate_reply_node)
 
     graph.add_edge(START, "parse_email")
@@ -56,7 +70,8 @@ def build_extraction_graph():
     graph.add_edge("rule_fallback", "normalize_times")
     graph.add_edge("normalize_times", "schedule")
     graph.add_edge("schedule", "retrieve_places")
-    graph.add_edge("retrieve_places", "generate_reply")
+    graph.add_edge("retrieve_places", "reserve_place")
+    graph.add_edge("reserve_place", "generate_reply")
     graph.add_edge("generate_reply", END)
 
     return graph.compile()
@@ -138,6 +153,32 @@ def retrieve_places_node(state: ExtractionGraphState) -> ExtractionGraphState:
         return {**state, "error": error}
 
 
+def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    extraction = state.get("extraction")
+    if not extraction:
+        return state
+
+    try:
+        provider_name = state.get("reservation_provider") or ("html" if state.get("reservation_html") else "mock")
+        executor = executor_from_name(
+            provider_name,
+            html_path=state.get("reservation_html"),
+            target=state.get("reservation_target"),
+            runner_command=state.get("showui_runner_command"),
+        )
+        reservation_result = reserve_selected_place(
+            extraction,
+            state.get("recommendation"),
+            state.get("place_recommendation"),
+            executor=executor,
+        )
+        return {**state, "reservation_result": reservation_result}
+    except Exception as exc:
+        previous_error = state.get("error")
+        error = f"{previous_error}; reservation failed: {exc}" if previous_error else f"reservation failed: {exc}"
+        return {**state, "error": error}
+
+
 def generate_reply_node(state: ExtractionGraphState) -> ExtractionGraphState:
     extraction = state.get("extraction")
     if not extraction:
@@ -148,6 +189,7 @@ def generate_reply_node(state: ExtractionGraphState) -> ExtractionGraphState:
             extraction,
             state.get("recommendation"),
             place_recommendation=state.get("place_recommendation"),
+            reservation_result=state.get("reservation_result"),
             timezone=state.get("timezone", "Asia/Seoul"),
         )
         return {**state, "reply_draft": draft}

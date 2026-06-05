@@ -95,3 +95,23 @@ class PlaceRecommendation(BaseModel):
     selected: Optional[PlaceCandidate] = None
     status: str = Field(description="One of selected, no_query, no_candidates.")
     summary: str = ""
+
+
+class ReservationRequest(BaseModel):
+    place_name: str
+    start: str
+    end: str
+    party_size: int = 1
+    customer_name: str = "Schedule-to-Action Agent"
+    note: Optional[str] = None
+
+
+class ReservationResult(BaseModel):
+    status: str = Field(description="One of confirmed, failed, skipped, needs_manual_action.")
+    place_name: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    confirmation_id: Optional[str] = None
+    message: str = ""
+    failure_reason: Optional[str] = None
+    steps: List[str] = Field(default_factory=list)

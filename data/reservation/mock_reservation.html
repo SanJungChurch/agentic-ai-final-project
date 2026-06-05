@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock Reservation Page</title>
+  </head>
+  <body>
+    <main class="reservation-app">
+      <h1>Mock Cafe Reservation</h1>
+      <form id="reservation-form">
+        <label>
+          Date
+          <input name="date" type="text" aria-label="Date" placeholder="YYYY-MM-DD" />
+        </label>
+        <label>
+          Time
+          <input name="time" type="text" aria-label="Time" placeholder="HH:MM" />
+        </label>
+        <label>
+          Party size
+          <input name="party_size" type="number" min="1" max="8" aria-label="Party size" />
+        </label>
+        <button type="submit">Reserve</button>
+      </form>
+      <p id="reservation-result" role="status" data-status="idle"></p>
+
+      <section id="slots" aria-label="available reservation slots">
+        <article
+          data-slot="true"
+          data-place=""
+          data-start="2026-05-27T17:00:00+09:00"
+          data-end="2026-05-27T18:00:00+09:00"
+          data-available="true"
+          data-confirmation-id="HTML-20260527-1700"
+        >
+          Wednesday 17:00 available
+        </article>
+        <article
+          data-slot="true"
+          data-place=""
+          data-start="2026-05-28T10:00:00+09:00"
+          data-end="2026-05-28T11:00:00+09:00"
+          data-available="false"
+        >
+          Thursday 10:00 unavailable
+        </article>
+      </section>
+    </main>
+    <script>
+      const form = document.querySelector("#reservation-form");
+      const result = document.querySelector("#reservation-result");
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const formData = new FormData(form);
+        const date = formData.get("date");
+        const time = formData.get("time");
+        const start = `${date}T${time}:00+09:00`;
+        const slot = [...document.querySelectorAll("[data-slot]")].find(
+          (node) => node.dataset.start === start
+        );
+
+        if (!slot) {
+          result.dataset.status = "failed";
+          result.dataset.failureReason = "slot_not_found";
+          result.textContent = "No matching reservation slot was found.";
+          return;
+        }
+
+        if (slot.dataset.available !== "true") {
+          result.dataset.status = "failed";
+          result.dataset.failureReason = "slot_unavailable";
+          result.textContent = "Reservation slot exists but is unavailable.";
+          return;
+        }
+
+        result.dataset.status = "confirmed";
+        result.dataset.confirmationId = slot.dataset.confirmationId;
+        result.textContent = `Reservation confirmed. Confirmation ID: ${slot.dataset.confirmationId}`;
+      });
+    </script>
+  </body>
+</html>

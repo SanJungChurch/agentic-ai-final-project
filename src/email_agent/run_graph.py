@@ -15,6 +15,10 @@ def main() -> None:
     parser.add_argument("--calendar", default=None, help="Optional path to a synthetic calendar JSON file.")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default=None)
     parser.add_argument("--place-search-html", default=None, help="Optional static HTML place search result file.")
+    parser.add_argument("--reservation-provider", choices=["mock", "html", "showui"], default=None)
+    parser.add_argument("--reservation-html", default=None, help="Optional static HTML reservation page.")
+    parser.add_argument("--reservation-target", default=None, help="Reservation page URL or local path for ShowUI.")
+    parser.add_argument("--showui-runner-command", default=None, help="Optional command that runs the ShowUI executor.")
     args = parser.parse_args()
 
     app = build_extraction_graph()
@@ -26,6 +30,10 @@ def main() -> None:
             "calendar_path": args.calendar,
             "place_provider": args.place_provider,
             "place_search_html": args.place_search_html,
+            "reservation_provider": args.reservation_provider,
+            "reservation_html": args.reservation_html,
+            "reservation_target": args.reservation_target,
+            "showui_runner_command": args.showui_runner_command,
         }
     )
 
@@ -36,6 +44,7 @@ def main() -> None:
         "extraction": extraction,
         "recommendation": result["recommendation"].model_dump() if result.get("recommendation") else None,
         "place_recommendation": result["place_recommendation"].model_dump() if result.get("place_recommendation") else None,
+        "reservation_result": result["reservation_result"].model_dump() if result.get("reservation_result") else None,
         "reply_draft": result["reply_draft"].model_dump() if result.get("reply_draft") else None,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
