@@ -42,7 +42,7 @@ class ReservationExecutorTest(unittest.TestCase):
         self.assertIn("submit reservation form", result.steps)
 
     def test_static_html_executor_fails_missing_slot(self) -> None:
-        extraction, recommendation, place_recommendation = _fixtures(start="2026-05-29T17:00:00+09:00")
+        extraction, recommendation, place_recommendation = _fixtures(start="2026-05-30T17:00:00+09:00")
         executor = StaticHtmlReservationExecutor("data/reservation/mock_reservation.html")
 
         result = reserve_selected_place(extraction, recommendation, place_recommendation, executor=executor)

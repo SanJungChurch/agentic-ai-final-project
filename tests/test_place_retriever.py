@@ -8,7 +8,7 @@ from src.email_agent.place_retriever import (
     build_place_query,
     recommend_place,
 )
-from src.email_agent.schema import ExtractionResult, Intent
+from src.email_agent.schema import ExtractionResult, Intent, PlaceCandidate
 
 
 class PlaceRetrieverTest(unittest.TestCase):
@@ -40,6 +40,53 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertEqual(recommendation.status, "selected")
         self.assertIsNotNone(recommendation.selected)
         self.assertEqual(recommendation.selected.name, "카페 온더힐")
+
+    def test_recommend_place_filters_unavailable_candidates(self) -> None:
+        class FakeProvider:
+            def search(self, query, *, location_hint=None):
+                return [
+                    PlaceCandidate(
+                        name="Unavailable Cafe",
+                        category="cafe",
+                        availability_hint="예약 불가",
+                        rating=5.0,
+                    ),
+                    PlaceCandidate(
+                        name="Reservable Cafe",
+                        category="cafe",
+                        availability_hint="예약 가능",
+                        rating=4.0,
+                    ),
+                ]
+
+        extraction = ExtractionResult(
+            intent=Intent.SCHEDULE_MEETING,
+            location_preference="campus cafe",
+        )
+
+        recommendation = recommend_place(extraction, provider=FakeProvider())
+
+        self.assertEqual(recommendation.status, "selected")
+        self.assertEqual(recommendation.selected.name, "Reservable Cafe")
+        self.assertEqual([candidate.name for candidate in recommendation.candidates], ["Reservable Cafe"])
+
+    def test_recommend_place_returns_no_candidates_when_all_unavailable(self) -> None:
+        class FakeProvider:
+            def search(self, query, *, location_hint=None):
+                return [
+                    PlaceCandidate(name="Closed Cafe", availability_hint="fully booked"),
+                    PlaceCandidate(name="Sold Out Cafe", availability_hint="sold out"),
+                ]
+
+        extraction = ExtractionResult(
+            intent=Intent.SCHEDULE_MEETING,
+            location_preference="campus cafe",
+        )
+
+        recommendation = recommend_place(extraction, provider=FakeProvider())
+
+        self.assertEqual(recommendation.status, "no_candidates")
+        self.assertEqual(recommendation.candidates, [])
 
     def test_kakao_provider_parses_documents(self) -> None:
         payload = {

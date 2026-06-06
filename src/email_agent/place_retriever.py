@@ -146,7 +146,8 @@ def recommend_place(
 
     place_provider = provider or MockPlaceProvider()
     candidates = place_provider.search(query, location_hint=extraction.location_preference)
-    scored = [_score_place(candidate, query) for candidate in candidates if candidate.name]
+    reservable_candidates = [candidate for candidate in candidates if candidate.name and _is_reservation_candidate(candidate)]
+    scored = [_score_place(candidate, query) for candidate in reservable_candidates]
     scored.sort(key=lambda item: item.score, reverse=True)
     selected = scored[0] if scored else None
 
@@ -213,6 +214,32 @@ def _score_place(candidate: PlaceCandidate, query: str) -> PlaceCandidate:
         score += 1.0
 
     return candidate.model_copy(update={"score": round(score, 4)})
+
+
+def _is_reservation_candidate(candidate: PlaceCandidate) -> bool:
+    hint = (candidate.availability_hint or "").strip().lower()
+    if not hint:
+        return True
+
+    unavailable_markers = [
+        "예약 불가",
+        "예약불가",
+        "예약 마감",
+        "예약마감",
+        "예약 종료",
+        "예약종료",
+        "예약 불가능",
+        "예약불가능",
+        "마감",
+        "불가",
+        "불가능",
+        "unavailable",
+        "not available",
+        "fully booked",
+        "closed",
+        "sold out",
+    ]
+    return not any(marker in hint for marker in unavailable_markers)
 
 
 def _text(card, selector: str) -> str | None:
