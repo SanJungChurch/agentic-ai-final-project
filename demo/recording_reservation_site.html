@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TableReserve - Cafe On The Hill</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #202124;
+        --muted: #5f6368;
+        --line: #d9dee7;
+        --soft: #f5f7fa;
+        --paper: #ffffff;
+        --brand: #0b6b5d;
+        --brand-dark: #084d43;
+        --accent: #d94f2b;
+        --ok: #0f7b5f;
+        --warn: #b42318;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #eef1f5;
+        color: var(--ink);
+        font-family: Arial, "Segoe UI", sans-serif;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 64px;
+        padding: 0 36px;
+        background: #ffffff;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        color: var(--brand-dark);
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--brand);
+        color: white;
+        font-size: 18px;
+      }
+
+      .nav {
+        display: flex;
+        gap: 22px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(430px, 1fr) 420px;
+        gap: 24px;
+        width: min(1180px, calc(100% - 48px));
+        margin: 26px auto;
+      }
+
+      .panel {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(23, 32, 42, 0.08);
+      }
+
+      .hero {
+        overflow: hidden;
+      }
+
+      .photo {
+        min-height: 262px;
+        background:
+          linear-gradient(120deg, rgba(11, 107, 93, 0.86), rgba(21, 65, 77, 0.58)),
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1100' height='520' viewBox='0 0 1100 520'%3E%3Crect width='1100' height='520' fill='%23e7ecef'/%3E%3Cpath d='M0 392h1100v128H0z' fill='%23bbc7cd'/%3E%3Cpath d='M92 88h916v296H92z' fill='%23fbfaf8'/%3E%3Cpath d='M150 142h182v184H150zM382 142h182v184H382zM614 142h182v184H614zM846 142h108v184H846z' fill='%2382a5a0'/%3E%3Cpath d='M84 384h934v22H84z' fill='%23839aa1'/%3E%3Ccircle cx='224' cy='354' r='24' fill='%23986844'/%3E%3Ccircle cx='704' cy='354' r='24' fill='%23986844'/%3E%3C/svg%3E");
+        background-size: cover;
+        background-position: center;
+        color: white;
+        padding: 42px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        font-size: 13px;
+      }
+
+      h1 {
+        margin: 72px 0 10px;
+        font-size: 42px;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .hero p {
+        width: min(520px, 100%);
+        margin: 0;
+        color: rgba(255, 255, 255, 0.92);
+        font-size: 16px;
+        line-height: 1.6;
+      }
+
+      .venue-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        padding: 24px;
+      }
+
+      .metric {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfe;
+      }
+
+      .metric strong {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--ink);
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .section {
+        padding: 24px;
+        border-top: 1px solid var(--line);
+      }
+
+      .section h2,
+      .booking h2 {
+        margin: 0 0 16px;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+
+      .slot-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .slot {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 14px;
+        align-items: center;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .slot[data-available="true"] {
+        border-color: rgba(15, 123, 95, 0.35);
+        background: #f2fbf8;
+      }
+
+      .slot strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .slot span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .badge {
+        min-width: 84px;
+        padding: 7px 10px;
+        border-radius: 999px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .badge.open {
+        color: var(--ok);
+        background: #dff7ee;
+      }
+
+      .badge.closed {
+        color: var(--warn);
+        background: #fde8e5;
+      }
+
+      .booking {
+        position: sticky;
+        top: 24px;
+        align-self: start;
+        padding: 24px;
+      }
+
+      .summary {
+        margin-bottom: 20px;
+        padding: 14px;
+        border: 1px solid #cfe3dd;
+        border-radius: 8px;
+        background: #f1faf6;
+      }
+
+      .summary strong {
+        display: block;
+        margin-bottom: 7px;
+      }
+
+      .summary span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      form {
+        display: grid;
+        gap: 14px;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        min-height: 46px;
+        border: 1px solid #c9d1dc;
+        border-radius: 8px;
+        padding: 11px 12px;
+        background: #ffffff;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 500;
+      }
+
+      textarea {
+        min-height: 76px;
+        resize: vertical;
+      }
+
+      input:focus,
+      textarea:focus {
+        outline: 3px solid rgba(11, 107, 93, 0.18);
+        border-color: var(--brand);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      button {
+        height: 50px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--brand);
+        color: white;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--brand-dark);
+      }
+
+      #reservation-result {
+        min-height: 64px;
+        margin-top: 16px;
+        padding: 14px;
+        border: 1px dashed #bac5d1;
+        border-radius: 8px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      #reservation-result[data-status="confirmed"] {
+        border-color: rgba(15, 123, 95, 0.45);
+        background: #effaf5;
+        color: #075b45;
+      }
+
+      #reservation-result[data-status="failed"] {
+        border-color: rgba(180, 35, 24, 0.4);
+        background: #fff3f1;
+        color: var(--warn);
+      }
+
+      .footer-note {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 920px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .booking {
+          position: static;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">T</div>
+        <span>TableReserve</span>
+      </div>
+      <nav class="nav" aria-label="primary">
+        <span>Restaurants</span>
+        <span>Cafes</span>
+        <span>Bookings</span>
+        <span>Support</span>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="panel hero" aria-label="venue details">
+        <div class="photo">
+          <span class="eyebrow">Soongsil Univ. Station · Cafe · Reservation</span>
+          <h1>Cafe On The Hill</h1>
+          <p>숭실대입구역에서 걸어서 4분, 팀플 회의와 조용한 커피 미팅에 맞춘 예약 가능한 카페입니다.</p>
+        </div>
+
+        <div class="venue-body">
+          <div class="metric">
+            <strong>주소</strong>
+            <span>서울 동작구 상도로 369 숭실대입구역 근처</span>
+          </div>
+          <div class="metric">
+            <strong>평점</strong>
+            <span>4.6 · 좌석 예약 가능 여부 확인 필요</span>
+          </div>
+          <div class="metric">
+            <strong>운영 시간</strong>
+            <span>월-금 09:00-22:00 · 토 10:00-20:00</span>
+          </div>
+          <div class="metric">
+            <strong>추천 용도</strong>
+            <span>팀플 회의, 3-4인 스터디, 노트북 작업</span>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Available reservation slots</h2>
+          <div class="slot-grid">
+            <div
+              class="slot"
+              data-slot
+              data-place="Cafe On The Hill"
+              data-start="2026-05-27T17:00:00+09:00"
+              data-end="2026-05-27T18:00:00+09:00"
+              data-available="true"
+              data-confirmation-id="HTML-20260527-1700"
+            >
+              <div>
+                <strong>2026년 5월 27일 수요일 17:00</strong>
+                <span>3-4인 테이블 · 60분 예약 가능</span>
+              </div>
+              <span class="badge open">Available</span>
+            </div>
+
+            <div
+              class="slot"
+              data-slot
+              data-place="Cafe On The Hill"
+              data-start="2026-05-28T10:00:00+09:00"
+              data-end="2026-05-28T11:00:00+09:00"
+              data-available="false"
+            >
+              <div>
+                <strong>2026년 5월 28일 목요일 10:00</strong>
+                <span>단체 예약으로 마감</span>
+              </div>
+              <span class="badge closed">Closed</span>
+            </div>
+
+            <div
+              class="slot"
+              data-slot
+              data-place="Cafe On The Hill"
+              data-start="2026-05-29T17:00:00+09:00"
+              data-end="2026-05-29T18:00:00+09:00"
+              data-available="false"
+            >
+              <div>
+                <strong>2026년 5월 29일 금요일 17:00</strong>
+                <span>좌석 확인 필요 · 현재 예약 불가</span>
+              </div>
+              <span class="badge closed">Full</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel booking" aria-label="reservation form">
+        <h2>Reserve a table</h2>
+        <div class="summary">
+          <strong>Cafe On The Hill</strong>
+          <span>Agent가 선택한 추천 시간: 2026-05-27 17:00</span>
+          <span>예상 인원: 동욱, 정인, 민수</span>
+        </div>
+
+        <form id="reservation-form">
+          <label for="reservation-date">
+            Date
+            <input
+              id="reservation-date"
+              name="date"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="2026-05-27"
+              value="2026-05-27"
+            />
+          </label>
+
+          <div class="row">
+            <label for="reservation-time">
+              Time
+              <input
+                id="reservation-time"
+                name="time"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="17:00"
+                value="17:00"
+              />
+            </label>
+
+            <label for="party-size">
+              Party size
+              <input id="party-size" name="party_size" type="number" min="1" max="8" value="3" />
+            </label>
+          </div>
+
+          <label for="customer-name">
+            Name
+            <input id="customer-name" name="customer_name" type="text" value="Agent Demo" />
+          </label>
+
+          <label for="request-note">
+            Request note
+            <textarea id="request-note" name="note">팀플 회의용 조용한 좌석이면 좋습니다.</textarea>
+          </label>
+
+          <button type="submit">Reserve</button>
+        </form>
+
+        <div
+          id="reservation-result"
+          role="status"
+          aria-live="polite"
+          data-status="idle"
+          data-confirmation-id=""
+          data-failure-reason=""
+        >
+          날짜와 시간을 입력한 뒤 Reserve 버튼을 누르면 예약 결과가 표시됩니다.
+        </div>
+
+        <p class="footer-note">
+          This local page is used for GUI-agent demonstration. It behaves like a booking page and exposes visible
+          confirmation states for the ShowUI runner.
+        </p>
+      </aside>
+    </main>
+
+    <script>
+      const form = document.querySelector("#reservation-form");
+      const result = document.querySelector("#reservation-result");
+      const slots = [...document.querySelectorAll("[data-slot]")];
+
+      function setResult(status, message, confirmationId = "", failureReason = "") {
+        result.dataset.status = status;
+        result.dataset.confirmationId = confirmationId;
+        result.dataset.failureReason = failureReason;
+        result.textContent = message;
+      }
+
+      function normalizeDate(value) {
+        const match = String(value || "").match(/\d{4}-\d{2}-\d{2}/);
+        return match ? match[0] : "";
+      }
+
+      function normalizeTime(value) {
+        const match = String(value || "").match(/\d{1,2}:\d{2}/);
+        if (!match) {
+          return "";
+        }
+        const [hour, minute] = match[0].split(":");
+        return `${hour.padStart(2, "0")}:${minute}`;
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+
+        const date = normalizeDate(document.querySelector("#reservation-date").value) || "2026-05-27";
+        const time = normalizeTime(document.querySelector("#reservation-time").value) || "17:00";
+        const partySize = Number(document.querySelector("#party-size").value || "3");
+
+        if (!date || !time || partySize < 1) {
+          setResult("failed", "Please enter date, time, and party size.", "", "missing_required_field");
+          return;
+        }
+
+        const requestedStart = `${date}T${time}:00+09:00`;
+        const slot = slots.find((item) => item.dataset.start === requestedStart);
+
+        if (!slot) {
+          setResult("failed", "No matching reservation slot was found.", "", "slot_not_found");
+          return;
+        }
+
+        if (slot.dataset.available !== "true") {
+          setResult("failed", "This reservation slot is currently unavailable.", "", "slot_unavailable");
+          return;
+        }
+
+        const confirmationId = slot.dataset.confirmationId || `HTML-${date.replaceAll("-", "")}-${time.replace(":", "")}`;
+        setResult(
+          "confirmed",
+          `Reservation confirmed. Confirmation ID: ${confirmationId}`,
+          confirmationId,
+          ""
+        );
+      });
+    </script>
+  </body>
+</html>

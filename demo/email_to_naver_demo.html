@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>E-mail to Naver Booking Agent</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #202124;
+        --muted: #65707d;
+        --line: #d9dee7;
+        --surface: #ffffff;
+        --soft: #f5f7fa;
+        --brand: #0b6b5d;
+        --brand-dark: #084d43;
+        --naver: #03c75a;
+        --warn: #b42318;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #eef2f6;
+        color: var(--ink);
+        font-family: Arial, "Segoe UI", sans-serif;
+      }
+
+      .app {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 100vh;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 64px;
+        padding: 0 32px;
+        background: #ffffff;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 800;
+      }
+
+      .mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--brand);
+        color: #ffffff;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 11px;
+        border-radius: 999px;
+        background: #e9f8f0;
+        color: #04783b;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(420px, 0.9fr) minmax(520px, 1.1fr);
+        gap: 20px;
+        width: min(1320px, calc(100% - 40px));
+        margin: 20px auto;
+      }
+
+      section,
+      aside {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 12px 30px rgba(23, 32, 42, 0.07);
+      }
+
+      .input-pane,
+      .result-pane {
+        padding: 22px;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-size: 18px;
+      }
+
+      .sub {
+        margin: 8px 0 18px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      textarea,
+      input,
+      select {
+        width: 100%;
+        border: 1px solid #cbd4df;
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--ink);
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 270px;
+        padding: 14px;
+        line-height: 1.55;
+        resize: vertical;
+      }
+
+      input,
+      select {
+        height: 44px;
+        padding: 0 12px;
+      }
+
+      textarea:focus,
+      input:focus,
+      select:focus {
+        outline: 3px solid rgba(11, 107, 93, 0.17);
+        border-color: var(--brand);
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      button,
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--brand);
+        color: #ffffff;
+        font: inherit;
+        font-weight: 900;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      button.secondary,
+      a.button.secondary {
+        background: #edf1f5;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+
+      button.naver,
+      a.button.naver {
+        background: var(--naver);
+        color: #ffffff;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.68;
+      }
+
+      .status {
+        min-height: 46px;
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px dashed #bac5d1;
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .cards {
+        display: grid;
+        gap: 12px;
+      }
+
+      .card {
+        padding: 15px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfe;
+      }
+
+      .card strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 138px 1fr;
+        gap: 8px 12px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .kv b {
+        color: var(--ink);
+      }
+
+      .reply {
+        white-space: pre-wrap;
+        line-height: 1.55;
+      }
+
+      .raw {
+        overflow: auto;
+        max-height: 280px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #101828;
+        color: #ecf2f8;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .target-box {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        padding: 14px;
+        border: 1px solid #cfe3dd;
+        border-radius: 8px;
+        background: #f1faf6;
+      }
+
+      @media (max-width: 980px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand">
+          <div class="mark">A</div>
+          <span>E-mail to Naver Booking Agent</span>
+        </div>
+        <span class="pill">HTML Demo</span>
+      </header>
+
+      <main>
+        <section class="input-pane">
+          <h1>이메일에서 일정 추출 후 네이버 예약 페이지로 연결</h1>
+          <p class="sub">
+            Streamlit 없이 동작하는 HTML 시연 화면입니다. 이메일을 입력하면 LangGraph가 일정, 장소, 추천 시간을
+            계산하고, 예약 단계에서는 네이버 지도 예약 URL을 ShowUI target으로 사용합니다.
+          </p>
+
+          <label for="emailText">
+            E-mail / conversation text
+            <textarea id="emailText">Agentic AI 팀플 회의 일정 조율:
+동욱: 저는 화요일 오후 3시 이후 가능합니다.
+정인: 저는 수요일 5시나 목요일 오전 괜찮아요.
+민수: 목요일은 어렵고 수요일 5시는 가능합니다.
+장소는 숭실대 근처 카페면 좋겠습니다.</textarea>
+          </label>
+
+          <div class="grid-2">
+            <label for="referenceDate">
+              Reference date
+              <input id="referenceDate" value="2026-05-23" />
+            </label>
+            <label for="executor">
+              Reservation executor
+              <select id="executor">
+                <option value="naver-visible">Naver visible browser</option>
+                <option value="naver-headless">Naver headless</option>
+                <option value="mock-visible">Stable local mock visible</option>
+                <option value="mock-headless">Stable local mock headless</option>
+              </select>
+            </label>
+          </div>
+
+          <label for="naverUrl">
+            Naver booking URL
+            <input
+              id="naverUrl"
+              value="https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/place/1649187599?c=17.24,0,0,0,dh&placePath=/booking?entry=bmp&from=map&fromPanelNum=2&timestamp=202606080430&locale=ko&svcName=map_pcv5&searchText=%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98"
+            />
+          </label>
+
+          <div class="actions">
+            <button id="runButton">Run agent</button>
+            <a id="openNaver" class="button naver" target="_blank" rel="noreferrer">Open Naver</a>
+            <button id="resetButton" class="secondary">Reset</button>
+          </div>
+
+          <div id="status" class="status">대기 중입니다.</div>
+        </section>
+
+        <aside class="result-pane">
+          <h2>Agent result</h2>
+          <div class="cards">
+            <div class="card">
+              <strong>1. Extraction</strong>
+              <div id="extraction" class="kv">
+                <b>상태</b><span>아직 실행 전입니다.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <strong>2. Schedule decision</strong>
+              <div id="schedule" class="kv">
+                <b>상태</b><span>아직 실행 전입니다.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <strong>3. Place decision</strong>
+              <div id="place" class="kv">
+                <b>상태</b><span>아직 실행 전입니다.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <strong>4. Reservation</strong>
+              <div class="target-box">
+                <span id="reservationSummary">예약 실행 전입니다.</span>
+                <a id="reservationTarget" class="button secondary" target="_blank" rel="noreferrer">Open target page</a>
+              </div>
+            </div>
+
+            <div class="card">
+              <strong>5. Reply draft</strong>
+              <div id="reply" class="reply">아직 생성 전입니다.</div>
+            </div>
+
+            <div class="card">
+              <strong>Raw JSON</strong>
+              <pre id="raw" class="raw">{}</pre>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script>
+      const naverUrlInput = document.querySelector("#naverUrl");
+      const openNaver = document.querySelector("#openNaver");
+      const reservationTarget = document.querySelector("#reservationTarget");
+      const runButton = document.querySelector("#runButton");
+      const resetButton = document.querySelector("#resetButton");
+      const statusBox = document.querySelector("#status");
+
+      function syncLinks() {
+        openNaver.href = naverUrlInput.value;
+        reservationTarget.href = naverUrlInput.value;
+      }
+
+      function escapeText(value) {
+        return String(value ?? "");
+      }
+
+      function setKv(id, rows) {
+        const node = document.querySelector(`#${id}`);
+        node.innerHTML = rows
+          .map(([key, value]) => `<b>${key}</b><span>${escapeText(value)}</span>`)
+          .join("");
+      }
+
+      function setRunning(isRunning) {
+        runButton.disabled = isRunning;
+        runButton.textContent = isRunning ? "Running..." : "Run agent";
+      }
+
+      async function runAgent() {
+        syncLinks();
+        setRunning(true);
+        statusBox.textContent = "LangGraph 실행 중입니다. Naver visible 모드에서는 브라우저 창이 열릴 수 있습니다.";
+
+        const payload = {
+          email_text: document.querySelector("#emailText").value,
+          reference_date: document.querySelector("#referenceDate").value,
+          executor: document.querySelector("#executor").value,
+          naver_url: naverUrlInput.value,
+        };
+
+        try {
+          const response = await fetch("/api/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          renderResult(data);
+          statusBox.textContent = response.ok
+            ? "완료되었습니다."
+            : `실행 중 오류가 발생했습니다: ${data.error || response.status}`;
+        } catch (error) {
+          statusBox.textContent = `브라우저에서 API 호출 실패: ${error}`;
+        } finally {
+          setRunning(false);
+        }
+      }
+
+      function renderResult(data) {
+        const extraction = data.extraction || {};
+        const recommendation = data.recommendation || {};
+        const selected = recommendation.selected || {};
+        const candidate = selected.candidate || {};
+        const place = data.place_recommendation || {};
+        const selectedPlace = place.selected || {};
+        const reservation = data.reservation_result || {};
+        const reply = data.reply_draft || {};
+
+        setKv("extraction", [
+          ["provider", data.provider || ""],
+          ["participants", (extraction.participants || []).join(", ")],
+          ["location", extraction.location_preference || ""],
+          ["summary", extraction.source_summary || ""],
+        ]);
+
+        setKv("schedule", [
+          ["status", recommendation.status || ""],
+          ["selected", candidate.start || ""],
+          ["score", selected.score ?? ""],
+          ["reasons", (selected.reasons || []).slice(0, 3).join(" / ")],
+        ]);
+
+        setKv("place", [
+          ["status", place.status || ""],
+          ["selected", selectedPlace.name || ""],
+          ["address", selectedPlace.address || ""],
+          ["score", selectedPlace.score ?? ""],
+        ]);
+
+        const target = data.reservation_target || naverUrlInput.value;
+        reservationTarget.href = target;
+        reservationSummary.textContent = [
+          `status: ${reservation.status || ""}`,
+          `confirmation: ${reservation.confirmation_id || ""}`,
+          `message: ${reservation.message || ""}`,
+        ].join(" | ");
+
+        document.querySelector("#reply").textContent = reply.body || "답장 초안이 없습니다.";
+        document.querySelector("#raw").textContent = JSON.stringify(data, null, 2);
+      }
+
+      resetButton.addEventListener("click", () => window.location.reload());
+      runButton.addEventListener("click", runAgent);
+      naverUrlInput.addEventListener("input", syncLinks);
+      syncLinks();
+    </script>
+  </body>
+</html>
