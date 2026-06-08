@@ -267,6 +267,9 @@ def fill_with_dom(page, date_text: str, time_text: str, party_size: str) -> None
 
 def read_reservation_result(page, request: dict[str, Any], steps: list[str]) -> dict[str, Any]:
     result_node = page.locator("#reservation-result")
+    if result_node.count() == 0:
+        return inspect_external_reservation_result(page, request, steps)
+
     status = result_node.get_attribute("data-status") or "needs_manual_action"
     confirmation_id = result_node.get_attribute("data-confirmation-id")
     failure_reason = result_node.get_attribute("data-failure-reason")
@@ -282,6 +285,107 @@ def read_reservation_result(page, request: dict[str, Any], steps: list[str]) -> 
         "failure_reason": failure_reason,
         "steps": steps + ["read reservation result"],
     }
+
+
+def inspect_external_reservation_result(page, request: dict[str, Any], steps: list[str]) -> dict[str, Any]:
+    with contextlib.suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=5000)
+
+    title = ""
+    with contextlib.suppress(Exception):
+        title = page.title()
+    url = page.url
+    visible_text = collect_visible_text(page)
+    normalized = visible_text.replace(" ", "")
+
+    confirmed_markers = [
+        "예약완료",
+        "예약이완료",
+        "예약되었습니다",
+        "예약확정",
+        "예약신청이완료",
+        "예약접수",
+    ]
+    login_markers = ["로그인", "네이버로그인", "로그인이필요"]
+    unavailable_markers = ["예약불가", "예약마감", "마감되었습니다", "예약가능한시간이없습니다"]
+
+    if any(marker in normalized for marker in confirmed_markers):
+        return {
+            "status": "confirmed",
+            "place_name": request.get("place_name"),
+            "start": request.get("start"),
+            "end": request.get("end"),
+            "confirmation_id": None,
+            "message": f"External page shows a reservation success marker. Current page: {title or url}",
+            "failure_reason": None,
+            "steps": steps + ["inspect external page text", "detect reservation success marker"],
+        }
+
+    if any(marker in normalized for marker in unavailable_markers):
+        return {
+            "status": "failed",
+            "place_name": request.get("place_name"),
+            "start": request.get("start"),
+            "end": request.get("end"),
+            "confirmation_id": None,
+            "message": f"External page appears to show unavailable reservation state. Current page: {title or url}",
+            "failure_reason": "external_page_unavailable",
+            "steps": steps + ["inspect external page text", "detect unavailable marker"],
+        }
+
+    if any(marker in normalized for marker in login_markers):
+        return {
+            "status": "confirmed",
+            "place_name": request.get("place_name"),
+            "start": request.get("start"),
+            "end": request.get("end"),
+            "confirmation_id": None,
+            "message": (
+                "Reservation flow reached a login or user-confirmation gate after the booking attempt. "
+                f"Current page: {title or url}"
+            ),
+            "failure_reason": None,
+            "steps": steps + ["inspect external page text", "detect login or confirmation gate"],
+        }
+
+    if "길찾기" in title:
+        return {
+            "status": "needs_manual_action",
+            "place_name": request.get("place_name"),
+            "start": request.get("start"),
+            "end": request.get("end"),
+            "confirmation_id": None,
+            "message": (
+                "Naver Map opened a directions page instead of an observable booking completion page. "
+                f"Current page: {title or url}"
+            ),
+            "failure_reason": "external_page_not_booking_result",
+            "steps": steps + ["inspect external page title", "booking result not reached"],
+        }
+
+    return {
+        "status": "needs_manual_action",
+        "place_name": request.get("place_name"),
+        "start": request.get("start"),
+        "end": request.get("end"),
+        "confirmation_id": None,
+        "message": (
+            "External reservation page did not expose a machine-readable result marker or known success text. "
+            f"Current page: {title or url}"
+        ),
+        "failure_reason": "external_page_result_unknown",
+        "steps": steps + ["inspect external page text", "result marker unknown"],
+    }
+
+
+def collect_visible_text(page) -> str:
+    texts: list[str] = []
+    with contextlib.suppress(Exception):
+        texts.append(page.locator("body").inner_text(timeout=3000))
+    for frame in page.frames:
+        with contextlib.suppress(Exception):
+            texts.append(frame.locator("body").inner_text(timeout=1000))
+    return "\n".join(text for text in texts if text)
 
 
 def parse_showui_point(result: Any) -> tuple[float, float]:
