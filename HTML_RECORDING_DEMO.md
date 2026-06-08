@@ -45,3 +45,32 @@ python scripts\run_html_recording_demo.py --executor local-showui
 python scripts\run_html_recording_demo.py
 ```
 
+## HTML 입력 데모
+
+Streamlit 없이 이메일 입력부터 실행하려면 로컬 HTML 서버를 실행합니다.
+
+```cmd
+python scripts\serve_html_demo.py --port 8765
+```
+
+브라우저에서 `http://127.0.0.1:8765/`에 접속합니다.
+
+- `Open target`: 현재 executor와 이메일 장소 표현에 맞는 예약 target을 엽니다.
+- `Open mock`: 안정 시연용 local mock 예약 페이지를 엽니다.
+- `Place provider`: `Demo dynamic`은 이메일의 장소 표현이 숭실대/강남/홍대/판교로 바뀌면 추천 장소도 바꿉니다.
+- `Naver booking URL`: 비워두면 이메일 장소 표현을 기준으로 기본 네이버 검색/예약 URL을 자동 선택합니다.
+
+## Google Workspace 연동
+
+Gmail/Google Calendar 연동은 선택 기능입니다.
+
+1. Google Cloud Console에서 OAuth Client를 `Desktop app`으로 생성합니다.
+2. JSON 파일을 `credentials/google_oauth_client.json`에 저장합니다.
+3. 필요한 패키지를 설치합니다.
+
+```cmd
+pip install -r requirements.txt
+```
+
+HTML 화면에서 `Load Gmail`을 누르면 최초 1회 OAuth 브라우저 인증이 실행되고,
+토큰은 `credentials/google_workspace_token.json`에 저장됩니다.

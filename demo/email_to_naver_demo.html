@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>E-mail to Naver Booking Agent</title>
+    <title>E-mail to Booking Agent</title>
     <style>
       :root {
         color-scheme: light;
@@ -15,7 +15,9 @@
         --brand: #0b6b5d;
         --brand-dark: #084d43;
         --naver: #03c75a;
+        --blue: #2563eb;
         --warn: #b42318;
+        --ok: #0f7b5f;
       }
 
       * {
@@ -28,12 +30,6 @@
         background: #eef2f6;
         color: var(--ink);
         font-family: Arial, "Segoe UI", sans-serif;
-      }
-
-      .app {
-        display: grid;
-        grid-template-rows: auto 1fr;
-        min-height: 100vh;
       }
 
       header {
@@ -50,7 +46,7 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        font-weight: 800;
+        font-weight: 900;
       }
 
       .mark {
@@ -77,9 +73,9 @@
 
       main {
         display: grid;
-        grid-template-columns: minmax(420px, 0.9fr) minmax(520px, 1.1fr);
+        grid-template-columns: minmax(420px, 0.9fr) minmax(560px, 1.1fr);
         gap: 20px;
-        width: min(1320px, calc(100% - 40px));
+        width: min(1360px, calc(100% - 40px));
         margin: 20px auto;
       }
 
@@ -91,8 +87,7 @@
         box-shadow: 0 12px 30px rgba(23, 32, 42, 0.07);
       }
 
-      .input-pane,
-      .result-pane {
+      .pane {
         padding: 22px;
       }
 
@@ -139,7 +134,7 @@
       }
 
       textarea {
-        min-height: 270px;
+        min-height: 244px;
         padding: 14px;
         line-height: 1.55;
         resize: vertical;
@@ -166,6 +161,7 @@
 
       .actions {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
         margin-top: 18px;
       }
@@ -175,8 +171,8 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 46px;
-        padding: 0 16px;
+        min-height: 44px;
+        padding: 0 14px;
         border: 0;
         border-radius: 8px;
         background: var(--brand);
@@ -200,13 +196,17 @@
         color: #ffffff;
       }
 
+      button.blue {
+        background: var(--blue);
+      }
+
       button:disabled {
         cursor: wait;
         opacity: 0.68;
       }
 
       .status {
-        min-height: 46px;
+        min-height: 44px;
         margin-top: 14px;
         padding: 12px;
         border: 1px dashed #bac5d1;
@@ -216,21 +216,58 @@
         line-height: 1.45;
       }
 
-      .cards {
+      .cards,
+      .steps {
         display: grid;
         gap: 12px;
       }
 
-      .card {
+      .card,
+      .step {
         padding: 15px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: #fbfcfe;
       }
 
-      .card strong {
+      .card strong,
+      .step strong {
         display: block;
         margin-bottom: 8px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 132px 96px 1fr;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 26px;
+        border-radius: 999px;
+        padding: 0 9px;
+        background: #edf1f5;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .tag.done,
+      .tag.selected,
+      .tag.confirmed,
+      .tag.ready {
+        background: #e5f7ef;
+        color: var(--ok);
+      }
+
+      .tag.failed,
+      .tag.no_valid_candidate {
+        background: #fde8e5;
+        color: var(--warn);
       }
 
       .kv {
@@ -246,22 +283,6 @@
         color: var(--ink);
       }
 
-      .reply {
-        white-space: pre-wrap;
-        line-height: 1.55;
-      }
-
-      .raw {
-        overflow: auto;
-        max-height: 280px;
-        padding: 12px;
-        border-radius: 8px;
-        background: #101828;
-        color: #ecf2f8;
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
       .target-box {
         display: grid;
         gap: 10px;
@@ -272,130 +293,196 @@
         background: #f1faf6;
       }
 
+      .reply {
+        white-space: pre-wrap;
+        line-height: 1.55;
+      }
+
+      .raw {
+        overflow: auto;
+        max-height: 260px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #101828;
+        color: #ecf2f8;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
       @media (max-width: 980px) {
         main {
+          grid-template-columns: 1fr;
+        }
+
+        .step {
           grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
-    <div class="app">
-      <header>
-        <div class="brand">
-          <div class="mark">A</div>
-          <span>E-mail to Naver Booking Agent</span>
-        </div>
-        <span class="pill">HTML Demo</span>
-      </header>
+    <header>
+      <div class="brand">
+        <div class="mark">A</div>
+        <span>E-mail to Booking Agent</span>
+      </div>
+      <span class="pill" id="googleStatus">Google: 확인 중</span>
+    </header>
 
-      <main>
-        <section class="input-pane">
-          <h1>이메일에서 일정 추출 후 네이버 예약 페이지로 연결</h1>
-          <p class="sub">
-            Streamlit 없이 동작하는 HTML 시연 화면입니다. 이메일을 입력하면 LangGraph가 일정, 장소, 추천 시간을
-            계산하고, 예약 단계에서는 네이버 지도 예약 URL을 ShowUI target으로 사용합니다.
-          </p>
+    <main>
+      <section class="pane">
+        <h1>이메일 기반 일정 조율 및 예약 시연</h1>
+        <p class="sub">이메일 내용을 입력하거나 Gmail에서 가져온 뒤, 일정 추출부터 예약 action까지 단계별로 실행합니다.</p>
 
-          <label for="emailText">
-            E-mail / conversation text
-            <textarea id="emailText">Agentic AI 팀플 회의 일정 조율:
+        <label for="emailText">
+          E-mail / conversation text
+          <textarea id="emailText">Agentic AI 팀플 회의 일정 조율:
 동욱: 저는 화요일 오후 3시 이후 가능합니다.
 정인: 저는 수요일 5시나 목요일 오전 괜찮아요.
 민수: 목요일은 어렵고 수요일 5시는 가능합니다.
 장소는 숭실대 근처 카페면 좋겠습니다.</textarea>
+        </label>
+
+        <div class="grid-2">
+          <label for="referenceDate">
+            Reference date
+            <input id="referenceDate" value="2026-05-23" />
           </label>
-
-          <div class="grid-2">
-            <label for="referenceDate">
-              Reference date
-              <input id="referenceDate" value="2026-05-23" />
-            </label>
-            <label for="executor">
-              Reservation executor
-              <select id="executor">
-                <option value="naver-visible">Naver visible browser</option>
-                <option value="naver-headless">Naver headless</option>
-                <option value="mock-visible">Stable local mock visible</option>
-                <option value="mock-headless">Stable local mock headless</option>
-              </select>
-            </label>
-          </div>
-
-          <label for="naverUrl">
-            Naver booking URL
-            <input
-              id="naverUrl"
-              value="https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/place/1649187599?c=17.24,0,0,0,dh&placePath=/booking?entry=bmp&from=map&fromPanelNum=2&timestamp=202606080430&locale=ko&svcName=map_pcv5&searchText=%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98"
-            />
+          <label for="executor">
+            Reservation executor
+            <select id="executor">
+              <option value="naver-visible">Naver visible browser</option>
+              <option value="naver-headless">Naver headless</option>
+              <option value="mock-visible">Stable local mock visible</option>
+              <option value="mock-headless">Stable local mock headless</option>
+            </select>
           </label>
+        </div>
 
-          <div class="actions">
-            <button id="runButton">Run agent</button>
-            <a id="openNaver" class="button naver" target="_blank" rel="noreferrer">Open Naver</a>
-            <button id="resetButton" class="secondary">Reset</button>
+        <div class="grid-2">
+          <label for="placeProvider">
+            Place provider
+            <select id="placeProvider">
+              <option value="demo">Demo dynamic</option>
+              <option value="kakao">Kakao Local API</option>
+              <option value="html">Static HTML sample</option>
+              <option value="mock">Mock fixed</option>
+            </select>
+          </label>
+          <label for="calendarSource">
+            Calendar source
+            <select id="calendarSource">
+              <option value="synthetic">Synthetic calendar</option>
+              <option value="google">Google Calendar</option>
+            </select>
+          </label>
+        </div>
+
+        <label for="naverUrl">
+          Naver booking URL
+          <input id="naverUrl" placeholder="비워두면 이메일 장소 표현으로 자동 선택합니다." />
+        </label>
+
+        <div class="actions">
+          <button id="runButton">Run agent</button>
+          <button id="gmailButton" class="blue">Load Gmail</button>
+          <a id="openTarget" class="button naver" target="_blank" rel="noreferrer">Open target</a>
+          <a id="openMock" class="button secondary" target="_blank" rel="noreferrer" href="/demo/recording_reservation_site.html">Open mock</a>
+          <button id="resetButton" class="secondary">Reset</button>
+        </div>
+
+        <div id="status" class="status">대기 중입니다.</div>
+      </section>
+
+      <aside class="pane">
+        <h2>Process</h2>
+        <div id="steps" class="steps">
+          <div class="step"><strong>Input</strong><span class="tag">idle</span><span>이메일 입력 대기</span></div>
+          <div class="step"><strong>Extraction</strong><span class="tag">idle</span><span>Gemini 또는 fallback extractor</span></div>
+          <div class="step"><strong>Calendar</strong><span class="tag">idle</span><span>캘린더 충돌 확인</span></div>
+          <div class="step"><strong>Reservation</strong><span class="tag">idle</span><span>GUI 예약 action 대기</span></div>
+        </div>
+
+        <h2 style="margin-top: 18px">Agent result</h2>
+        <div class="cards">
+          <div class="card">
+            <strong>1. Extraction</strong>
+            <div id="extraction" class="kv">
+              <b>상태</b><span>아직 실행 전입니다.</span>
+            </div>
           </div>
 
-          <div id="status" class="status">대기 중입니다.</div>
-        </section>
-
-        <aside class="result-pane">
-          <h2>Agent result</h2>
-          <div class="cards">
-            <div class="card">
-              <strong>1. Extraction</strong>
-              <div id="extraction" class="kv">
-                <b>상태</b><span>아직 실행 전입니다.</span>
-              </div>
-            </div>
-
-            <div class="card">
-              <strong>2. Schedule decision</strong>
-              <div id="schedule" class="kv">
-                <b>상태</b><span>아직 실행 전입니다.</span>
-              </div>
-            </div>
-
-            <div class="card">
-              <strong>3. Place decision</strong>
-              <div id="place" class="kv">
-                <b>상태</b><span>아직 실행 전입니다.</span>
-              </div>
-            </div>
-
-            <div class="card">
-              <strong>4. Reservation</strong>
-              <div class="target-box">
-                <span id="reservationSummary">예약 실행 전입니다.</span>
-                <a id="reservationTarget" class="button secondary" target="_blank" rel="noreferrer">Open target page</a>
-              </div>
-            </div>
-
-            <div class="card">
-              <strong>5. Reply draft</strong>
-              <div id="reply" class="reply">아직 생성 전입니다.</div>
-            </div>
-
-            <div class="card">
-              <strong>Raw JSON</strong>
-              <pre id="raw" class="raw">{}</pre>
+          <div class="card">
+            <strong>2. Schedule decision</strong>
+            <div id="schedule" class="kv">
+              <b>상태</b><span>아직 실행 전입니다.</span>
             </div>
           </div>
-        </aside>
-      </main>
-    </div>
+
+          <div class="card">
+            <strong>3. Place decision</strong>
+            <div id="place" class="kv">
+              <b>상태</b><span>아직 실행 전입니다.</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <strong>4. Reservation</strong>
+            <div class="target-box">
+              <span id="reservationSummary">예약 실행 전입니다.</span>
+              <a id="reservationTarget" class="button secondary" target="_blank" rel="noreferrer">Open result target</a>
+            </div>
+          </div>
+
+          <div class="card">
+            <strong>5. Reply draft</strong>
+            <div id="reply" class="reply">아직 생성 전입니다.</div>
+          </div>
+
+          <div class="card">
+            <strong>Raw JSON</strong>
+            <pre id="raw" class="raw">{}</pre>
+          </div>
+        </div>
+      </aside>
+    </main>
 
     <script>
+      const DEFAULT_NAVER_URL =
+        "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/place/1649187599?c=17.24,0,0,0,dh&placePath=/booking?entry=bmp";
+      const MOCK_URL = "/demo/recording_reservation_site.html";
+
+      const emailText = document.querySelector("#emailText");
       const naverUrlInput = document.querySelector("#naverUrl");
-      const openNaver = document.querySelector("#openNaver");
+      const openTarget = document.querySelector("#openTarget");
       const reservationTarget = document.querySelector("#reservationTarget");
+      const executor = document.querySelector("#executor");
       const runButton = document.querySelector("#runButton");
+      const gmailButton = document.querySelector("#gmailButton");
       const resetButton = document.querySelector("#resetButton");
       const statusBox = document.querySelector("#status");
 
+      function inferTargetFromInput() {
+        if (executor.value.startsWith("mock")) return MOCK_URL;
+        const manual = naverUrlInput.value.trim();
+        if (manual) return manual;
+        const text = emailText.value.toLowerCase();
+        if (text.includes("강남") || text.includes("gangnam")) {
+          return "https://map.naver.com/p/search/%EA%B0%95%EB%82%A8%20%EC%B9%B4%ED%8E%98";
+        }
+        if (text.includes("홍대") || text.includes("hongdae")) {
+          return "https://map.naver.com/p/search/%ED%99%8D%EB%8C%80%20%EC%B9%B4%ED%8E%98";
+        }
+        if (text.includes("판교") || text.includes("pangyo")) {
+          return "https://map.naver.com/p/search/%ED%8C%90%EA%B5%90%20%EC%B9%B4%ED%8E%98";
+        }
+        return DEFAULT_NAVER_URL;
+      }
+
       function syncLinks() {
-        openNaver.href = naverUrlInput.value;
-        reservationTarget.href = naverUrlInput.value;
+        const target = inferTargetFromInput();
+        openTarget.href = target;
+        reservationTarget.href = target;
       }
 
       function escapeText(value) {
@@ -404,9 +491,7 @@
 
       function setKv(id, rows) {
         const node = document.querySelector(`#${id}`);
-        node.innerHTML = rows
-          .map(([key, value]) => `<b>${key}</b><span>${escapeText(value)}</span>`)
-          .join("");
+        node.innerHTML = rows.map(([key, value]) => `<b>${key}</b><span>${escapeText(value)}</span>`).join("");
       }
 
       function setRunning(isRunning) {
@@ -414,16 +499,91 @@
         runButton.textContent = isRunning ? "Running..." : "Run agent";
       }
 
+      function renderSteps(steps) {
+        const node = document.querySelector("#steps");
+        node.innerHTML = (steps || [])
+          .map(
+            (step) =>
+              `<div class="step"><strong>${escapeText(step.name)}</strong><span class="tag ${escapeText(
+                step.status
+              )}">${escapeText(step.status)}</span><span>${escapeText(step.detail)}</span></div>`
+          )
+          .join("");
+      }
+
+      async function refreshGoogleStatus() {
+        try {
+          const response = await fetch("/api/google/status");
+          const data = await response.json();
+          gmailButton.dataset.googleConfigured = data.configured ? "true" : "false";
+          document.querySelector("#googleStatus").textContent = data.configured
+            ? data.authorized
+              ? "Google: authorized"
+              : "Google: credentials ready"
+            : "Google: setup needed";
+          if (!data.configured) {
+            statusBox.textContent =
+              "Google OAuth 설정 파일이 없습니다. credentials/google_oauth_client.json을 추가하면 Gmail 로그인이 가능합니다.";
+          }
+        } catch {
+          document.querySelector("#googleStatus").textContent = "Google: unavailable";
+          gmailButton.dataset.googleConfigured = "false";
+        }
+      }
+
+      async function loadGmail() {
+        if (gmailButton.dataset.googleConfigured !== "true") {
+          statusBox.textContent =
+            "Gmail 로그인을 시작할 수 없습니다. Google Cloud OAuth Desktop client JSON을 credentials/google_oauth_client.json에 넣어주세요.";
+          return;
+        }
+        gmailButton.disabled = true;
+        statusBox.textContent = "Gmail에서 최신 이메일을 불러오는 중입니다.";
+        try {
+          const response = await fetch("/api/google/gmail/schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: "newer_than:3d", max_results: 50, top_k: 10 }),
+          });
+          const data = await response.json();
+          if (!response.ok || data.error) {
+            statusBox.textContent = `Gmail 연동 필요: ${data.error || data.message}`;
+            return;
+          }
+          if (!data.email_text) {
+            statusBox.textContent = data.message || "최근 3일 내 일정 관련 Gmail을 찾지 못했습니다.";
+            return;
+          }
+          emailText.value = data.email_text;
+          const subjects = (data.messages || [])
+            .slice(0, 3)
+            .map((item) => item.subject)
+            .join(" / ");
+          statusBox.textContent = `최근 3일 일정 관련 Gmail ${(data.messages || []).length}개를 불러왔습니다. ${subjects}`;
+          syncLinks();
+        } finally {
+          gmailButton.disabled = false;
+        }
+      }
+
       async function runAgent() {
         syncLinks();
         setRunning(true);
-        statusBox.textContent = "LangGraph 실행 중입니다. Naver visible 모드에서는 브라우저 창이 열릴 수 있습니다.";
+        renderSteps([
+          { name: "Input", status: "done", detail: "HTML email text" },
+          { name: "Extraction", status: "running", detail: "Gemini or fallback extractor" },
+          { name: "Calendar", status: "pending", detail: "waiting" },
+          { name: "Reservation", status: "pending", detail: "waiting" },
+        ]);
+        statusBox.textContent = "Agent workflow 실행 중입니다.";
 
         const payload = {
-          email_text: document.querySelector("#emailText").value,
+          email_text: emailText.value,
           reference_date: document.querySelector("#referenceDate").value,
-          executor: document.querySelector("#executor").value,
-          naver_url: naverUrlInput.value,
+          executor: executor.value,
+          naver_url: naverUrlInput.value.trim(),
+          place_provider: document.querySelector("#placeProvider").value,
+          calendar_source: document.querySelector("#calendarSource").value,
         };
 
         try {
@@ -434,11 +594,9 @@
           });
           const data = await response.json();
           renderResult(data);
-          statusBox.textContent = response.ok
-            ? "완료되었습니다."
-            : `실행 중 오류가 발생했습니다: ${data.error || response.status}`;
+          statusBox.textContent = response.ok ? "완료되었습니다." : `실행 오류: ${data.error || response.status}`;
         } catch (error) {
-          statusBox.textContent = `브라우저에서 API 호출 실패: ${error}`;
+          statusBox.textContent = `API 호출 실패: ${error}`;
         } finally {
           setRunning(false);
         }
@@ -453,6 +611,8 @@
         const selectedPlace = place.selected || {};
         const reservation = data.reservation_result || {};
         const reply = data.reply_draft || {};
+
+        renderSteps(data.pipeline_steps || []);
 
         setKv("extraction", [
           ["provider", data.provider || ""],
@@ -472,11 +632,12 @@
           ["status", place.status || ""],
           ["selected", selectedPlace.name || ""],
           ["address", selectedPlace.address || ""],
-          ["score", selectedPlace.score ?? ""],
+          ["source", selectedPlace.source_url || ""],
         ]);
 
-        const target = data.reservation_target || naverUrlInput.value;
+        const target = data.reservation_target || inferTargetFromInput();
         reservationTarget.href = target;
+        openTarget.href = target;
         reservationSummary.textContent = [
           `status: ${reservation.status || ""}`,
           `confirmation: ${reservation.confirmation_id || ""}`,
@@ -489,8 +650,12 @@
 
       resetButton.addEventListener("click", () => window.location.reload());
       runButton.addEventListener("click", runAgent);
+      gmailButton.addEventListener("click", loadGmail);
+      executor.addEventListener("change", syncLinks);
+      emailText.addEventListener("input", syncLinks);
       naverUrlInput.addEventListener("input", syncLinks);
       syncLinks();
+      refreshGoogleStatus();
     </script>
   </body>
 </html>

@@ -11,3 +11,6 @@ accelerate>=0.30.0
 qwen-vl-utils>=0.0.14
 safetensors>=0.4.0
 streamlit>=1.36.0
+google-api-python-client>=2.130.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0

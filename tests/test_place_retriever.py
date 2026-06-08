@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from src.email_agent.place_retriever import (
+    DemoPlaceProvider,
     KakaoLocalPlaceProvider,
     StaticHtmlPlaceProvider,
     build_place_query,
@@ -87,6 +88,15 @@ class PlaceRetrieverTest(unittest.TestCase):
 
         self.assertEqual(recommendation.status, "no_candidates")
         self.assertEqual(recommendation.candidates, [])
+
+    def test_demo_provider_changes_candidates_by_location_query(self) -> None:
+        provider = DemoPlaceProvider()
+        gangnam = provider.search("강남역 근처 카페")
+        hongdae = provider.search("홍대 근처 카페")
+
+        self.assertNotEqual(gangnam[0].name, hongdae[0].name)
+        self.assertEqual(gangnam[0].name, "강남 브루잉 라운지")
+        self.assertEqual(hongdae[0].name, "홍대 루프 카페")
 
     def test_kakao_provider_parses_documents(self) -> None:
         payload = {

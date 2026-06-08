@@ -53,6 +53,75 @@ class MockPlaceProvider:
         ]
 
 
+class DemoPlaceProvider:
+    """Deterministic query-sensitive provider for the HTML recording demo."""
+
+    def search(self, query: str, *, location_hint: str | None = None) -> list[PlaceCandidate]:
+        normalized = f"{query} {location_hint or ''}".lower()
+        if "강남" in normalized or "gangnam" in normalized:
+            return [
+                PlaceCandidate(
+                    name="강남 브루잉 라운지",
+                    address="서울 강남구 테헤란로 152",
+                    category="cafe",
+                    rating=4.5,
+                    source_url="https://map.naver.com/p/search/%EA%B0%95%EB%82%A8%20%EC%B9%B4%ED%8E%98",
+                    availability_hint="네이버 예약 확인 필요",
+                ),
+                PlaceCandidate(
+                    name="역삼 스터디 카페",
+                    address="서울 강남구 논현로 508",
+                    category="study room",
+                    rating=4.2,
+                    source_url="https://map.naver.com/p/search/%EC%97%AD%EC%82%BC%20%EC%8A%A4%ED%84%B0%EB%94%94%EC%B9%B4%ED%8E%98",
+                    availability_hint="좌석 확인 필요",
+                ),
+            ]
+        if "홍대" in normalized or "hongdae" in normalized:
+            return [
+                PlaceCandidate(
+                    name="홍대 루프 카페",
+                    address="서울 마포구 와우산로 94",
+                    category="cafe",
+                    rating=4.4,
+                    source_url="https://map.naver.com/p/search/%ED%99%8D%EB%8C%80%20%EC%B9%B4%ED%8E%98",
+                    availability_hint="네이버 예약 확인 필요",
+                )
+            ]
+        if "판교" in normalized or "pangyo" in normalized:
+            return [
+                PlaceCandidate(
+                    name="판교 워크 라운지",
+                    address="경기 성남시 분당구 판교역로 166",
+                    category="cafe",
+                    rating=4.3,
+                    source_url="https://map.naver.com/p/search/%ED%8C%90%EA%B5%90%20%EC%B9%B4%ED%8E%98",
+                    availability_hint="네이버 예약 확인 필요",
+                )
+            ]
+        return [
+            PlaceCandidate(
+                name="카페 온더힐",
+                address="서울 동작구 상도로 369 숭실대입구역 근처",
+                category="cafe",
+                rating=4.6,
+                source_url=(
+                    "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/"
+                    "place/1649187599?c=17.24,0,0,0,dh&placePath=/booking?entry=bmp"
+                ),
+                availability_hint="네이버 예약 확인 필요",
+            ),
+            PlaceCandidate(
+                name="스터디룸 숭실",
+                address="서울 동작구 상도로 360",
+                category="study room",
+                rating=4.4,
+                source_url="https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%8A%A4%ED%84%B0%EB%94%94%EB%A3%B8",
+                availability_hint="평일 저녁 예약 가능",
+            ),
+        ]
+
+
 class StaticHtmlPlaceProvider:
     def __init__(self, html_path: str | Path) -> None:
         self.html_path = Path(html_path)
@@ -182,6 +251,8 @@ def build_place_query(extraction: ExtractionResult) -> str:
 def provider_from_name(name: str, *, html_path: str | None = None) -> PlaceProvider:
     if name == "mock":
         return MockPlaceProvider()
+    if name == "demo":
+        return DemoPlaceProvider()
     if name == "html":
         if not html_path:
             raise ValueError("--html is required when --provider html is used.")
