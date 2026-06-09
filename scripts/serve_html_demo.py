@@ -21,6 +21,7 @@ from src.email_agent.google_workspace import (
     google_workspace_status,
 )
 from src.email_agent.graph import build_extraction_graph
+from src.email_agent.llm_extractor import create_constraint_extractor
 from src.email_agent.place_retriever import provider_from_name, recommend_place
 from src.email_agent.reply_generator import generate_reply_draft
 from src.email_agent.reservation_executor import executor_from_name, reserve_selected_place
@@ -79,6 +80,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                     max_results=int(payload.get("max_results") or 50),
                     top_k=int(payload.get("top_k") or 10),
                 )
+                result["groups"] = group_gmail_messages(result.get("messages", []))
                 self._send_json(result)
             except Exception as exc:
                 self._send_json({"error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -87,6 +89,20 @@ class DemoHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json()
                 self._send_json(run_agent(self.server, payload))
+            except Exception as exc:
+                self._send_json({"error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        if parsed.path == "/api/run_batch":
+            try:
+                payload = self._read_json()
+                self._send_json(run_agent_batch(self.server, payload))
+            except Exception as exc:
+                self._send_json({"error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        if parsed.path == "/api/chat":
+            try:
+                payload = self._read_json()
+                self._send_json(answer_chat(payload))
             except Exception as exc:
                 self._send_json({"error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
@@ -121,8 +137,10 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
     email_text = payload.get("email_text") or _read_text(args.sample)
     executor = payload.get("executor") or "naver-visible"
     reference_date = payload.get("reference_date") or args.reference_date
+    llm_provider = payload.get("llm_provider") or args.llm_provider
     place_provider = payload.get("place_provider") or args.place_provider
     naver_url = payload.get("naver_url") or infer_naver_url(email_text)
+    selected_date = payload.get("selected_date") or None
 
     calendar_path = str(PROJECT_ROOT / args.calendar)
     temp_calendar_path = None
@@ -148,6 +166,8 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
                 "email_text": email_text,
                 "reference_date": reference_date,
                 "timezone": args.timezone,
+                "llm_provider": llm_provider,
+                "selected_date": selected_date,
                 "calendar_path": calendar_path,
                 "place_provider": place_provider,
                 "place_search_html": str(PROJECT_ROOT / args.place_search_html),
@@ -156,7 +176,7 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
                 "showui_runner_command": runner_command,
             }
         )
-        graph_result = apply_demo_schedule_fallback(graph_result, email_text, calendar_path)
+        graph_result = apply_demo_schedule_fallback(graph_result, email_text, calendar_path, selected_date)
         graph_result = apply_email_location_override(
             graph_result,
             email_text,
@@ -173,7 +193,37 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
             Path(temp_calendar_path).unlink(missing_ok=True)
 
 
-def apply_demo_schedule_fallback(graph_result: dict, email_text: str, calendar_path: str) -> dict:
+def run_agent_batch(server: DemoServer, payload: dict) -> dict:
+    contexts = payload.get("appointment_contexts") or []
+    if not contexts:
+        contexts = split_appointment_contexts(payload.get("email_text") or "")
+    if not contexts:
+        contexts = [{"id": "manual_context", "title": "Manual context", "email_text": payload.get("email_text") or ""}]
+
+    results = []
+    for index, context in enumerate(contexts, start=1):
+        context_payload = dict(payload)
+        context_payload["email_text"] = context.get("email_text") or ""
+        context_payload["selected_date"] = context.get("selected_date") or payload.get("selected_date")
+        result = run_agent(server, context_payload)
+        result["appointment_id"] = context.get("id") or f"appointment_{index}"
+        result["appointment_title"] = context.get("title") or f"Appointment {index}"
+        result["source_message_ids"] = context.get("message_ids", [])
+        results.append(result)
+
+    return {
+        "mode": "batch",
+        "num_appointments": len(results),
+        "appointments": results,
+    }
+
+
+def apply_demo_schedule_fallback(
+    graph_result: dict,
+    email_text: str,
+    calendar_path: str,
+    selected_date: str | None = None,
+) -> dict:
     recommendation = graph_result.get("recommendation")
     if recommendation and recommendation.selected:
         return graph_result
@@ -182,7 +232,7 @@ def apply_demo_schedule_fallback(graph_result: dict, email_text: str, calendar_p
     if not demo_extraction.candidate_times:
         return graph_result
 
-    recommendation = recommend_time(demo_extraction, load_calendar(calendar_path))
+    recommendation = recommend_time(demo_extraction, load_calendar(calendar_path), preferred_date=selected_date)
     updated = dict(graph_result)
     updated["extraction"] = demo_extraction
     updated["recommendation"] = recommendation
@@ -277,7 +327,11 @@ def serialize_graph_result(graph_result: dict, payload: dict, reservation_target
     return {
         "provider": graph_result.get("provider"),
         "error": graph_result.get("error"),
+        "reference_date": graph_result.get("reference_date"),
+        "reference_date_source": graph_result.get("reference_date_source"),
+        "reference_date_error": graph_result.get("reference_date_error"),
         "reservation_target": reservation_target,
+        "selected_date": payload.get("selected_date"),
         "pipeline_steps": build_pipeline_steps(graph_result, payload, reservation_target),
         "extraction": graph_result["extraction"].model_dump() if graph_result.get("extraction") else None,
         "recommendation": graph_result["recommendation"].model_dump() if graph_result.get("recommendation") else None,
@@ -432,6 +486,11 @@ def build_pipeline_steps(graph_result: dict, payload: dict, reservation_target: 
     return [
         {"name": "Input", "status": "done", "detail": "HTML email text"},
         {"name": "Gmail", "status": "optional", "detail": "available when OAuth is configured"},
+        {
+            "name": "Reference date",
+            "status": graph_result.get("reference_date_source") or "unknown",
+            "detail": graph_result.get("reference_date") or graph_result.get("reference_date_error") or "",
+        },
         {"name": "Extraction", "status": "done" if extraction else "failed", "detail": graph_result.get("provider") or ""},
         {
             "name": "Calendar",
@@ -441,7 +500,7 @@ def build_pipeline_steps(graph_result: dict, payload: dict, reservation_target: 
         {
             "name": "Time optimization",
             "status": recommendation.status if recommendation else "skipped",
-            "detail": recommendation.summary if recommendation else "",
+            "detail": _with_selected_date(recommendation.summary if recommendation else "", payload.get("selected_date")),
         },
         {
             "name": "Place retrieval",
@@ -456,6 +515,183 @@ def build_pipeline_steps(graph_result: dict, payload: dict, reservation_target: 
         },
         {"name": "Reply draft", "status": reply.status if reply else "skipped", "detail": "generated" if reply else ""},
     ]
+
+
+def group_gmail_messages(messages: list[dict]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for message in messages:
+        key = _message_group_key(message)
+        group = groups.setdefault(
+            key,
+            {
+                "id": key,
+                "title": _clean_subject(message.get("subject") or "(no subject)"),
+                "message_ids": [],
+                "subjects": [],
+                "dates": [],
+                "email_texts": [],
+                "schedule_score": 0,
+                "count": 0,
+            },
+        )
+        group["message_ids"].append(message.get("message_id"))
+        group["subjects"].append(message.get("subject") or "(no subject)")
+        group["dates"].append(message.get("date") or "")
+        group["email_texts"].append(message.get("email_text") or "")
+        group["schedule_score"] = max(group["schedule_score"], message.get("schedule_score") or 0)
+        group["count"] += 1
+
+    grouped = []
+    for group in groups.values():
+        email_text = "\n\n--- same appointment thread ---\n\n".join(
+            text for text in group.pop("email_texts") if text
+        )
+        grouped.append({**group, "email_text": email_text})
+    grouped.sort(key=lambda item: (item["schedule_score"], item["count"]), reverse=True)
+    return grouped
+
+
+def split_appointment_contexts(email_text: str) -> list[dict]:
+    chunks = [chunk.strip() for chunk in re.split(r"\n\s*---+\s*\n", email_text) if chunk.strip()]
+    if len(chunks) <= 1:
+        return []
+    return [
+        {
+            "id": f"manual_{index}",
+            "title": _context_title(chunk, index),
+            "email_text": chunk,
+            "message_ids": [],
+        }
+        for index, chunk in enumerate(chunks, start=1)
+    ]
+
+
+def answer_chat(payload: dict) -> dict:
+    question = (payload.get("question") or "").strip()
+    context = payload.get("context") or {}
+    llm_provider = payload.get("llm_provider")
+    if not question:
+        return {"answer": "질문을 입력해주세요.", "source": "fallback"}
+
+    fallback = _fallback_chat_answer(question, context)
+    try:
+        extractor = create_constraint_extractor(llm_provider)
+        answer = extractor.generate_text(_build_chat_prompt(question, context))
+        return {"answer": answer, "source": getattr(extractor, "provider_name", "llm")}
+    except Exception as exc:
+        return {"answer": fallback, "source": "context_fallback", "llm_error": f"{type(exc).__name__}: {exc}"}
+
+
+def _fallback_chat_answer(question: str, context: dict) -> str:
+    appointments = context.get("appointments") or []
+    if not appointments and context:
+        appointments = [context]
+    lowered = question.lower()
+
+    lines = []
+    for index, item in enumerate(appointments, start=1):
+        extraction = item.get("extraction") or {}
+        recommendation = item.get("recommendation") or {}
+        selected = (recommendation.get("selected") or {}).get("candidate") or {}
+        place = ((item.get("place_recommendation") or {}).get("selected") or {}).get("name")
+        reservation = item.get("reservation_result") or {}
+        title = item.get("appointment_title") or f"약속 {index}"
+        if "메일" in question or "context" in lowered:
+            summary = extraction.get("source_summary") or "선택된 메일 context가 있습니다."
+            lines.append(f"{title}: {summary}")
+        elif "예약" in question:
+            lines.append(f"{title}: 예약 상태는 {reservation.get('status') or 'unknown'}입니다. {reservation.get('message') or ''}".strip())
+        elif "장소" in question:
+            lines.append(f"{title}: 장소 후보는 {place or extraction.get('location_preference') or '아직 없습니다'}.")
+        else:
+            start = selected.get("start") or "선택된 시간이 없습니다"
+            participants = ", ".join(extraction.get("participants") or [])
+            lines.append(f"{title}: 추천 시간은 {start}, 참석자는 {participants or '미확인'}입니다.")
+
+    return "\n".join(lines) if lines else "아직 agent 실행 결과가 없어 답변할 context가 부족합니다."
+
+
+def _build_chat_prompt(question: str, context: dict) -> str:
+    compact_context = json.dumps(_compact_chat_context(context), ensure_ascii=False, indent=2)
+    return f"""You are a concise Korean chatbot for an e-mail scheduling agent demo.
+
+Answer only from the provided context. If the context is insufficient, say what is missing.
+Keep the answer short and practical.
+
+Context:
+{compact_context}
+
+User question:
+{question}
+"""
+
+
+def _compact_chat_context(context: dict) -> dict:
+    appointments = context.get("appointments")
+    if appointments:
+        return {
+            "appointments": [_compact_single_result(item) for item in appointments],
+        }
+    if context.get("extraction") or context.get("recommendation"):
+        return _compact_single_result(context)
+    return {
+        "email_text": context.get("email_text", "")[:2000],
+        "appointment_contexts": [
+            {
+                "title": item.get("title"),
+                "email_text": (item.get("email_text") or "")[:1200],
+            }
+            for item in context.get("appointment_contexts", [])[:5]
+        ],
+    }
+
+
+def _compact_single_result(item: dict) -> dict:
+    extraction = item.get("extraction") or {}
+    recommendation = item.get("recommendation") or {}
+    selected = recommendation.get("selected") or {}
+    place = item.get("place_recommendation") or {}
+    reservation = item.get("reservation_result") or {}
+    return {
+        "title": item.get("appointment_title") or item.get("appointment_id"),
+        "participants": extraction.get("participants"),
+        "location_preference": extraction.get("location_preference"),
+        "selected_time": (selected.get("candidate") or {}).get("start"),
+        "schedule_summary": recommendation.get("summary"),
+        "place": (place.get("selected") or {}).get("name"),
+        "reservation_status": reservation.get("status"),
+        "reservation_message": reservation.get("message"),
+        "reply_draft": (item.get("reply_draft") or {}).get("body"),
+    }
+
+
+def _message_group_key(message: dict) -> str:
+    thread_id = message.get("thread_id")
+    if thread_id:
+        return f"thread:{thread_id}"
+    return "subject:" + _clean_subject(message.get("subject") or "(no subject)").lower()
+
+
+def _clean_subject(subject: str) -> str:
+    cleaned = re.sub(r"^\s*(re|fw|fwd)\s*:\s*", "", subject, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*(답장|전달)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip() or "(no subject)"
+
+
+def _context_title(text: str, index: int) -> str:
+    for line in text.splitlines():
+        line = line.strip()
+        if line.lower().startswith("subject:"):
+            return line.split(":", 1)[1].strip() or f"Appointment {index}"
+        if line:
+            return line[:48]
+    return f"Appointment {index}"
+
+
+def _with_selected_date(summary: str, selected_date: str | None) -> str:
+    if not selected_date:
+        return summary
+    return f"{summary} 선택 날짜: {selected_date}".strip()
 
 
 def _read_text(path: str) -> str:
@@ -486,8 +722,9 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--sample", default="data/samples/email_001.txt")
-    parser.add_argument("--reference-date", default="2026-05-23")
+    parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
+    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao", "demo"], default="demo")
     parser.add_argument("--place-search-html", default="data/place_search/soongsil_cafes.html")

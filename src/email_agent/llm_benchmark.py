@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from .extractor import parse_email_thread
 from .kvret_adapter import load_kvret_rows
-from .llm_extractor import GeminiConstraintExtractor
+from .llm_extractor import create_constraint_extractor
 from .mailex_adapter import load_mailex_rows
 from .schema import EmailThread, ExtractionResult
 
@@ -34,6 +34,7 @@ def run_llm_benchmark(
     reference_date: str | None = None,
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
+    llm_provider: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = _read_jsonl(benchmark_path)[offset : offset + limit]
@@ -45,6 +46,7 @@ def run_llm_benchmark(
         reference_date=reference_date,
         timezone=timezone,
         extractor=extractor,
+        llm_provider=llm_provider,
         sleep_seconds=sleep_seconds,
     )
 
@@ -58,6 +60,7 @@ def run_mailex_llm_benchmark(
     reference_date: str | None = None,
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
+    llm_provider: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = load_mailex_rows(mailex_root, split=split, limit=offset + limit)[offset : offset + limit]
@@ -69,6 +72,7 @@ def run_mailex_llm_benchmark(
         reference_date=reference_date,
         timezone=timezone,
         extractor=extractor,
+        llm_provider=llm_provider,
         sleep_seconds=sleep_seconds,
     )
 
@@ -82,6 +86,7 @@ def run_kvret_llm_benchmark(
     reference_date: str | None = None,
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
+    llm_provider: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = load_kvret_rows(kvret_root, split=split, limit=offset + limit)[offset : offset + limit]
@@ -93,6 +98,7 @@ def run_kvret_llm_benchmark(
         reference_date=reference_date,
         timezone=timezone,
         extractor=extractor,
+        llm_provider=llm_provider,
         sleep_seconds=sleep_seconds,
     )
 
@@ -106,9 +112,10 @@ def run_llm_benchmark_rows(
     reference_date: str | None,
     timezone: str,
     extractor: ConstraintExtractor | None = None,
+    llm_provider: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
-    llm = extractor or GeminiConstraintExtractor()
+    llm = extractor or create_constraint_extractor(llm_provider)
     cases = []
 
     for idx, row in enumerate(rows):
@@ -126,7 +133,7 @@ def run_llm_benchmark_rows(
     summary = _summarize(cases)
     return {
         "benchmark": benchmark_name,
-        "provider": "gemini",
+        "provider": getattr(llm, "provider_name", llm_provider or "unknown"),
         "limit": limit,
         "offset": offset,
         "reference_date": reference_date,
@@ -137,7 +144,7 @@ def run_llm_benchmark_rows(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate Gemini extraction on a small JSONL benchmark.")
+    parser = argparse.ArgumentParser(description="Evaluate LLM extraction on a small JSONL benchmark.")
     parser.add_argument(
         "--benchmark",
         default="data/benchmarks/week1_event_extraction.jsonl",
@@ -154,10 +161,11 @@ def main() -> None:
         help="Path to local KVRET root, for example dataset/kvret. When set, --benchmark and --mailex-root are ignored.",
     )
     parser.add_argument("--split", default="test", help="Dataset split to evaluate.")
-    parser.add_argument("--limit", type=int, default=10, help="Maximum number of cases to send to Gemini.")
+    parser.add_argument("--limit", type=int, default=10, help="Maximum number of cases to send to the LLM.")
     parser.add_argument("--offset", type=int, default=0, help="Number of leading cases to skip.")
     parser.add_argument("--reference-date", default=None, help="Reference date for relative time normalization.")
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for time normalization.")
+    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
     parser.add_argument("--sleep", type=float, default=0.0, help="Seconds to sleep between API calls.")
     parser.add_argument("--output", default=None, help="Optional path to write the full JSON report.")
     args = parser.parse_args()
@@ -170,6 +178,7 @@ def main() -> None:
             offset=args.offset,
             reference_date=args.reference_date,
             timezone=args.timezone,
+            llm_provider=args.llm_provider,
             sleep_seconds=args.sleep,
         )
     elif args.mailex_root:
@@ -180,6 +189,7 @@ def main() -> None:
             offset=args.offset,
             reference_date=args.reference_date,
             timezone=args.timezone,
+            llm_provider=args.llm_provider,
             sleep_seconds=args.sleep,
         )
     else:
@@ -189,6 +199,7 @@ def main() -> None:
             offset=args.offset,
             reference_date=args.reference_date,
             timezone=args.timezone,
+            llm_provider=args.llm_provider,
             sleep_seconds=args.sleep,
         )
 

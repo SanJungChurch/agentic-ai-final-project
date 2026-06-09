@@ -97,7 +97,7 @@ python -m ipykernel install --user --name agentic --display-name "Python (agenti
 
 ## 환경 변수 설정
 
-Gemini API를 사용하려면 `.env.example`을 복사해 `.env` 파일을 만든 뒤 API 키를 입력합니다.
+Gemini API 또는 로컬 Qwen 모델을 사용하려면 `.env.example`을 복사해 `.env` 파일을 만든 뒤 필요한 값을 입력합니다.
 
 ```bat
 copy .env.example .env
@@ -107,8 +107,13 @@ notepad .env
 `.env` 예시:
 
 ```text
+LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+
+# 로컬 Qwen3:4b를 Ollama로 사용할 때
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3:4b
 ```
 
 `.env` 파일은 `.gitignore`에 포함되어 있으므로 GitHub에 업로드되지 않습니다.
@@ -121,13 +126,20 @@ Rule-based baseline extractor 실행:
 python -m src.email_agent.extract --sample data\samples\email_001.txt
 ```
 
-LangGraph + Gemini 기반 extraction workflow 실행:
+LangGraph + LLM 기반 extraction workflow 실행:
 
 ```bat
-python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date 2026-05-23
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto
 ```
 
-Gemini API 키가 없거나 LLM 호출이 실패하면 자동으로 rule-based fallback이 실행됩니다.
+Qwen3:4b를 선택하려면 Ollama를 실행하고 모델을 받은 뒤 provider를 지정합니다.
+
+```bat
+ollama pull qwen3:4b
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto --llm-provider qwen
+```
+
+LLM 호출이 실패하면 자동으로 rule-based fallback이 실행됩니다.
 
 Calendar 파일까지 연결해 scheduling node를 함께 실행할 수도 있습니다.
 

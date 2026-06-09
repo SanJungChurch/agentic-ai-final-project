@@ -26,6 +26,8 @@ def load_calendar(path: str | Path) -> dict[str, Any]:
 def recommend_time(
     extraction: ExtractionResult,
     calendar_data: dict[str, Any],
+    *,
+    preferred_date: str | None = None,
 ) -> ScheduleRecommendation:
     candidates = build_time_candidates(extraction)
     if not candidates:
@@ -43,9 +45,13 @@ def recommend_time(
         for candidate in candidates
     ]
     valid_decisions = [decision for decision in decisions if decision.valid]
-    selected = max(valid_decisions, key=lambda item: item.score) if valid_decisions else None
+    preferred_decisions = _filter_by_preferred_date(valid_decisions, preferred_date)
+    selected_pool = preferred_decisions or valid_decisions
+    selected = max(selected_pool, key=lambda item: item.score) if selected_pool else None
 
     if selected:
+        if preferred_decisions:
+            selected.reasons.append(f"사용자가 선택한 날짜({preferred_date})의 후보입니다.")
         return ScheduleRecommendation(
             selected=selected,
             candidates=decisions,
@@ -59,6 +65,19 @@ def recommend_time(
         status="no_valid_candidate",
         summary="모든 후보 시간이 hard constraint를 위반했습니다.",
     )
+
+
+def _filter_by_preferred_date(
+    decisions: list[CandidateDecision],
+    preferred_date: str | None,
+) -> list[CandidateDecision]:
+    if not preferred_date:
+        return []
+    return [
+        decision
+        for decision in decisions
+        if _parse_datetime(decision.candidate.start).date().isoformat() == preferred_date
+    ]
 
 
 def build_time_candidates(extraction: ExtractionResult) -> list[TimeCandidate]:

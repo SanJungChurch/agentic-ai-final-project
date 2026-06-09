@@ -188,12 +188,38 @@ def _extract_text_from_payload(payload: dict[str, Any]) -> str:
             text = re.sub(r"<[^>]+>", " ", text)
         return " ".join(text.split())
 
-    parts = []
-    for part in payload.get("parts", []) or []:
+    parts = payload.get("parts", []) or []
+    if mime_type == "multipart/alternative":
+        plain = _first_text_part(parts, "text/plain")
+        if plain:
+            return plain
+        html = _first_text_part(parts, "text/html")
+        if html:
+            return html
+
+    texts = []
+    seen = set()
+    for part in parts:
         text = _extract_text_from_payload(part)
+        normalized = " ".join(text.split())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        texts.append(normalized)
+    return "\n".join(texts)
+
+
+def _first_text_part(parts: list[dict[str, Any]], mime_type: str) -> str:
+    for part in parts:
+        if part.get("mimeType") == mime_type:
+            text = _extract_text_from_payload(part)
+            if text:
+                return text
+    for part in parts:
+        text = _first_text_part(part.get("parts", []) or [], mime_type)
         if text:
-            parts.append(text)
-    return "\n".join(parts)
+            return text
+    return ""
 
 
 def _decode_gmail_body(data: str) -> str:

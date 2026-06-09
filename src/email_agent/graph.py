@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 from .extractor import extract_constraints, parse_email_thread
-from .llm_extractor import GeminiConstraintExtractor
+from .llm_extractor import create_constraint_extractor
 from .place_retriever import provider_from_name, recommend_place
 from .reservation_executor import executor_from_name, reserve_selected_place
 from .reply_generator import generate_reply_draft
@@ -22,7 +22,11 @@ from .time_normalizer import normalize_extraction_times
 class ExtractionGraphState(TypedDict, total=False):
     email_text: str
     reference_date: str | None
+    reference_date_source: str | None
+    reference_date_error: str | None
     timezone: str
+    llm_provider: str | None
+    selected_date: str | None
     calendar_path: str | None
     place_provider: str | None
     place_search_html: str | None
@@ -49,6 +53,7 @@ def build_extraction_graph():
     graph = StateGraph(ExtractionGraphState)
 
     graph.add_node("parse_email", parse_email_node)
+    graph.add_node("infer_reference_date", infer_reference_date_node)
     graph.add_node("llm_extract", llm_extract_node)
     graph.add_node("rule_fallback", rule_fallback_node)
     graph.add_node("normalize_times", normalize_times_node)
@@ -58,7 +63,8 @@ def build_extraction_graph():
     graph.add_node("generate_reply", generate_reply_node)
 
     graph.add_edge(START, "parse_email")
-    graph.add_edge("parse_email", "llm_extract")
+    graph.add_edge("parse_email", "infer_reference_date")
+    graph.add_edge("infer_reference_date", "llm_extract")
     graph.add_conditional_edges(
         "llm_extract",
         should_fallback,
@@ -82,17 +88,37 @@ def parse_email_node(state: ExtractionGraphState) -> ExtractionGraphState:
     return {**state, "thread": thread}
 
 
-def llm_extract_node(state: ExtractionGraphState) -> ExtractionGraphState:
+def infer_reference_date_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    reference_date = (state.get("reference_date") or "").strip()
+    if reference_date and reference_date.lower() != "auto":
+        return {**state, "reference_date": reference_date, "reference_date_source": "user"}
+
     try:
-        extractor = GeminiConstraintExtractor()
+        extractor = create_constraint_extractor(state.get("llm_provider"))
+        inferred = extractor.infer_reference_date(
+            state["thread"],
+            timezone=state.get("timezone", "Asia/Seoul"),
+        )
+        if inferred:
+            return {**state, "reference_date": inferred, "reference_date_source": f"{extractor.provider_name}_inferred"}
+        return {**state, "reference_date": None, "reference_date_source": "not_found"}
+    except Exception as exc:
+        return {**state, "reference_date": None, "reference_date_source": "failed", "reference_date_error": str(exc)}
+
+
+def llm_extract_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    provider = state.get("llm_provider")
+    try:
+        extractor = create_constraint_extractor(provider)
         result = extractor.extract(
             state["thread"],
             reference_date=state.get("reference_date"),
             timezone=state.get("timezone", "Asia/Seoul"),
         )
-        return {**state, "extraction": result, "provider": "gemini"}
+        return {**state, "extraction": result, "provider": extractor.provider_name}
     except Exception as exc:
-        return {**state, "error": str(exc), "provider": "gemini_failed"}
+        failed_provider = (provider or "gemini").lower()
+        return {**state, "error": str(exc), "provider": f"{failed_provider}_failed"}
 
 
 def rule_fallback_node(state: ExtractionGraphState) -> ExtractionGraphState:
@@ -125,7 +151,11 @@ def schedule_node(state: ExtractionGraphState) -> ExtractionGraphState:
         return state
 
     try:
-        recommendation = recommend_time(extraction, load_calendar(calendar_path))
+        recommendation = recommend_time(
+            extraction,
+            load_calendar(calendar_path),
+            preferred_date=state.get("selected_date"),
+        )
         return {**state, "recommendation": recommendation}
     except Exception as exc:
         previous_error = state.get("error")

@@ -15,8 +15,10 @@ from src.email_agent.graph import build_extraction_graph
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the HTML-only recording demo with a local reservation page.")
     parser.add_argument("--sample", default="data/samples/email_001.txt")
-    parser.add_argument("--reference-date", default="2026-05-23")
+    parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
+    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--selected-date", default=None)
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default="html")
     parser.add_argument("--place-search-html", default="data/place_search/soongsil_cafes.html")
@@ -42,6 +44,8 @@ def main() -> None:
             "email_text": (PROJECT_ROOT / args.sample).read_text(encoding="utf-8"),
             "reference_date": args.reference_date,
             "timezone": args.timezone,
+            "llm_provider": args.llm_provider,
+            "selected_date": args.selected_date,
             "calendar_path": str(PROJECT_ROOT / args.calendar),
             "place_provider": args.place_provider,
             "place_search_html": str(PROJECT_ROOT / args.place_search_html),
@@ -54,6 +58,9 @@ def main() -> None:
     output = {
         "provider": result.get("provider"),
         "error": result.get("error"),
+        "reference_date": result.get("reference_date"),
+        "reference_date_source": result.get("reference_date_source"),
+        "reference_date_error": result.get("reference_date_error"),
         "extraction": result["extraction"].model_dump() if result.get("extraction") else None,
         "recommendation": result["recommendation"].model_dump() if result.get("recommendation") else None,
         "place_recommendation": result["place_recommendation"].model_dump()

@@ -1,0 +1,130 @@
+\documentclass[sigconf,nonacm]{acmart}
+
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\usepackage{booktabs}
+
+\title{Email-to-Action Agent: A LangGraph-Based Workflow for Scheduling, Place Retrieval, GUI Reservation, and Reply Generation}
+
+\author{Dongwook Kim}
+\affiliation{
+  \institution{Soongsil University}
+  \country{Republic of Korea}
+}
+\email{edit-this-email@example.com}
+
+\author{Jungin Ju}
+\affiliation{
+  \institution{Soongsil University}
+  \country{Republic of Korea}
+}
+\email{edit-this-email@example.com}
+
+\begin{document}
+
+\begin{abstract}
+We present Email-to-Action Agent, a LangGraph-based agentic workflow that converts unstructured scheduling e-mails into downstream actions. The system extracts meeting constraints from Gmail or manually provided e-mail text using Gemini, checks calendar conflicts, selects a feasible meeting time, retrieves place candidates, attempts GUI-based reservation through a ShowUI-style executor, and generates a reply draft. Unlike conventional LLM assistants that stop at summarization or recommendation, our prototype connects language understanding with external tools including Gmail, Google Calendar, place retrieval providers, and browser-based reservation pages. We implement the workflow as a stateful graph with fallback extraction, heuristic scheduling, dynamic place selection, and external page outcome detection. A local HTML demo and mock reservation page are used to evaluate end-to-end behavior under controlled conditions, while Naver Map integration illustrates the practical constraints of real-world web automation. The system completes the full scheduling-to-reply pipeline in controlled settings and can reach login or confirmation gates on real reservation pages, but remains limited by OAuth configuration, commercial website bot detection, and imperfect natural language extraction.
+\end{abstract}
+
+\keywords{LLM agents, scheduling, GUI agents, LangGraph, Gmail, calendar, web automation}
+
+\maketitle
+
+\section{Introduction}
+Scheduling a meeting from e-mail is a deceptively simple task. A user must read free-form messages, infer candidate times, check personal calendar conflicts, select a suitable time, search for an appropriate place, attempt a reservation, and write a reply. Current LLM-based assistants are effective at summarizing text or recommending options, but they often stop before taking concrete actions in external environments. This gap is especially visible when the task requires long-horizon state tracking and interaction with real web user interfaces.
+
+This paper describes \textit{Email-to-Action Agent}, a prototype that treats e-mail scheduling as an end-to-end agentic workflow rather than a single information extraction problem. The system accepts either manually entered e-mail text or Gmail messages from the recent inbox, extracts scheduling constraints with Gemini, checks conflicts against a calendar source, selects a meeting time, retrieves place candidates, invokes a GUI reservation executor, and drafts a reply. The implementation is organized as a LangGraph state machine, allowing each step to update a shared workflow state.
+
+Our goal is not to claim production-ready autonomous booking, but to investigate a realistic system boundary: how far can an LLM-centered agent proceed when it must combine natural language understanding, tool use, and GUI-level actions? The project makes three practical contributions. First, it implements a stateful graph for moving from unstructured e-mail to reservation and reply generation. Second, it integrates Gmail, Google Calendar, place retrieval, and ShowUI-style GUI execution in a single prototype. Third, it compares controlled local reservation evaluation with real Naver Map reservation attempts, exposing the limitations of commercial web automation.
+
+\section{System Design}
+The system is designed as a stateful workflow with explicit nodes for language understanding, scheduling, retrieval, reservation, and response generation. Figure~\ref{fig:workflow} summarizes the graph.
+
+\begin{figure}[t]
+\centering
+\small
+\begin{tabular}{c}
+\toprule
+Email/Gmail Input \\
+$\downarrow$ \\
+Parse E-mail $\rightarrow$ Gemini Extraction $\rightarrow$ Time Normalization \\
+$\downarrow$ \\
+Calendar Judge + Time Optimizer \\
+$\downarrow$ \\
+Place Retrieval \\
+$\downarrow$ \\
+ShowUI Reservation Executor \\
+$\downarrow$ \\
+Reply Draft Generation \\
+\bottomrule
+\end{tabular}
+\caption{High-level workflow of Email-to-Action Agent. Each block is implemented as a graph node that reads and writes shared state.}
+\label{fig:workflow}
+\end{figure}
+
+\subsection{Constraint Extraction}
+The extraction node receives an e-mail thread and asks Gemini to produce a structured schema containing intent, participants, candidate times, unavailable times, location preference, meeting duration, missing information, and a confidence score. Because LLM extraction may fail due to API quota, invalid JSON, or missing fields, the graph includes a rule-based fallback extractor and a demo schedule fallback for common Korean scheduling examples.
+
+\subsection{Scheduling}
+The scheduling node consumes normalized candidate times and calendar data. It applies hard constraints for valid time ranges, allowed hours, explicit unavailability, and calendar conflicts. Among valid candidates, it uses a simple heuristic score based on the number of available participants, preferred times, daytime preference, and meeting duration. This optimizer is intentionally lightweight: the prototype focuses on end-to-end workflow execution rather than solving a full operations research scheduling problem.
+
+\subsection{Place Retrieval}
+The place retrieval node supports multiple providers: a deterministic demo provider, a static HTML provider, a mock provider, and a Kakao Local API provider. The HTML demo uses the demo provider by default so that changing the e-mail location expression, such as from Soongsil University to Gangnam or Hongdae, changes the recommended place candidate. When the LLM omits the location preference, the server can infer a location hint from the original e-mail text for demonstration stability.
+
+\subsection{GUI Reservation}
+Reservation is delegated to a ShowUI-style GUI executor. For controlled evaluation, a local HTML reservation page exposes a machine-readable result marker, allowing the runner to verify whether the reservation was confirmed or failed. For external web pages such as Naver Map, the executor inspects visible page text and classifies outcomes as reservation success, unavailable state, login or confirmation gate reached, directions page reached, or unknown. Reaching a login or user-confirmation gate is treated as a successful downstream action for demonstration, because final booking requires user credentials and service-specific confirmation.
+
+\section{Implementation}
+The prototype is implemented in Python. LangGraph is used to coordinate the workflow state across parsing, extraction, normalization, scheduling, retrieval, reservation, and reply generation nodes. Gemini is used for LLM-based extraction, while Pydantic schemas validate structured outputs. The GUI executor uses Playwright to operate browser pages and can run either a deterministic DOM fallback or local ShowUI-style visual grounding.
+
+\subsection{Gmail and Calendar Integration}
+The HTML demo includes optional Google Workspace integration. A user provides a Google OAuth Desktop client JSON file, after which the system can request Gmail read-only and Calendar read-only scopes. The Gmail loader searches recent messages using the query \texttt{newer\_than:3d}, reads up to 50 messages, and filters them using schedule-related keywords such as ``meeting,'' ``schedule,'' ``appointment,'' ``interview,'' ``회의,'' ``면담,'' and ``일정.'' The top schedule-related messages are concatenated and placed into the e-mail input area. Google Calendar can also be selected as the calendar source, in which case recent busy events from the primary calendar are converted into the same calendar schema used by the scheduler.
+
+\subsection{HTML Demonstration Interface}
+The user-facing demonstration is a standalone HTML page served by a lightweight Python HTTP server. It shows the e-mail input, Gmail loading controls, reservation executor mode, place provider, calendar source, Naver booking URL, and a step-by-step process timeline. This interface is intentionally separate from Streamlit to make screen recording easier and to show the agentic process as it progresses from input to extraction, scheduling, place retrieval, reservation, and reply generation.
+
+\subsection{Reservation Targets}
+The system supports two types of reservation targets. The local mock page is used for deterministic evaluation and exposes a result marker such as \texttt{HTML-20260527-1700}. The Naver Map target demonstrates real web interaction but does not guarantee final confirmation due to login, dynamic iframes, bot detection, and service policy. This separation makes the prototype both demonstrable and honest about real-world deployment constraints.
+
+\section{Results and Evaluation}
+We evaluate the prototype through unit tests, controlled end-to-end execution, and real-page observation. The current implementation passes 40 unit tests covering extraction utilities, place retrieval, scheduling, and reservation execution. In the controlled local mock setting, the system completes the full workflow: it extracts candidate meeting times, selects a valid time, recommends a place, submits the reservation form, receives a confirmation ID, and generates a reply draft.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Component & Evaluation Target & Observed Result \\
+\midrule
+Gmail loader & Recent schedule e-mails & Filters recent 3-day Gmail messages \\
+Scheduler & Valid time selection & Selects conflict-free candidate \\
+Place retrieval & Location sensitivity & Changes candidates by location hint \\
+Mock reservation & End-to-end success & Confirms with local marker \\
+Naver target & Real web action & Reaches login/confirmation gate or reports unknown \\
+Reply generator & User response & Produces ready reply draft \\
+\bottomrule
+\end{tabular}
+\caption{Summary of prototype evaluation targets and observed behavior.}
+\label{tab:evaluation}
+\end{table}
+
+The local mock page is the most reliable evaluation environment because it controls the visible reservation slots and exposes an explicit result state. In this setting, the GUI executor confirms the selected slot and returns a reservation identifier. The real Naver Map experiment is less deterministic. ShowUI can visually operate a browser, but commercial websites still observe browser automation signals, login state, IP reputation, iframe navigation, and request patterns. Therefore, the system reports external outcomes using textual heuristics: success markers, unavailable markers, login gates, directions pages, or unknown results.
+
+These results suggest that the implemented workflow is suitable as a classroom-scale agentic system demonstration. It shows the difference between LLM-only recommendation and action-oriented workflow execution, while also making clear why production deployment requires robust authentication, anti-bot compliance, and human approval.
+
+\section{Limitations}
+The prototype has several limitations. First, Gmail and Calendar integration require OAuth configuration, enabled Google APIs, and test-user approval when the OAuth consent screen is in testing mode. Second, LLM extraction can miss or incorrectly normalize dates, participants, and locations, requiring fallback logic for stable demonstrations. Third, commercial reservation pages may block automated browsers or require login, CAPTCHA, or user confirmation. Fourth, the current optimizer is heuristic and does not model travel time, multi-person preference weights, or alternative duration search. Finally, controlled mock reservation results are useful for evaluation but do not prove that the system can autonomously complete real commercial bookings.
+
+\section{Conclusion}
+Email-to-Action Agent demonstrates how an LLM-centered assistant can be extended into a stateful agentic workflow that connects e-mail understanding with calendar reasoning, place retrieval, GUI reservation attempts, and reply generation. The implementation shows promising controlled end-to-end behavior, while real Naver Map experiments highlight the practical boundary between GUI automation and production web services. Future work will improve extraction robustness, add human-in-the-loop approval, support safer OAuth onboarding, and evaluate the system on a larger set of realistic scheduling scenarios.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+\section{Workflow Nodes}
+The implemented graph contains the following core nodes: \texttt{parse\_email}, \texttt{llm\_extract}, \texttt{rule\_fallback}, \texttt{normalize\_times}, \texttt{schedule}, \texttt{retrieve\_places}, \texttt{reserve\_place}, and \texttt{generate\_reply}. The HTML demo additionally includes Gmail loading, Google Calendar loading, demo schedule fallback, e-mail location override, and Naver URL inference.
+
+\end{document}

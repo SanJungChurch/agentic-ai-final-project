@@ -217,13 +217,18 @@
       }
 
       .cards,
-      .steps {
+      .steps,
+      .mail-list,
+      .chat-log,
+      .batch-results {
         display: grid;
         gap: 12px;
       }
 
       .card,
-      .step {
+      .step,
+      .mail-item,
+      .chat-message {
         padding: 15px;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -309,6 +314,57 @@
         line-height: 1.45;
       }
 
+      .mail-panel,
+      .chat-panel {
+        margin-top: 18px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      .mail-item {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 10px;
+        align-items: start;
+      }
+
+      .batch-item {
+        display: grid;
+        grid-template-columns: 104px 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 15px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfe;
+      }
+
+      .mail-item input {
+        width: 18px;
+        height: 18px;
+        margin-top: 2px;
+      }
+
+      .mail-meta,
+      .chat-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .chat-log {
+        max-height: 220px;
+        overflow: auto;
+      }
+
+      .chat-message.user {
+        background: #eef6ff;
+      }
+
+      .chat-message.agent {
+        background: #f1faf6;
+      }
+
       @media (max-width: 980px) {
         main {
           grid-template-columns: 1fr;
@@ -346,8 +402,25 @@
         <div class="grid-2">
           <label for="referenceDate">
             Reference date
-            <input id="referenceDate" value="2026-05-23" />
+            <input id="referenceDate" value="auto" />
           </label>
+          <label for="selectedDate">
+            Preferred meeting date
+            <input id="selectedDate" type="date" />
+          </label>
+        </div>
+
+        <div class="grid-2">
+          <label for="llmProvider">
+            LLM provider
+            <select id="llmProvider">
+              <option value="gemini">Gemini API</option>
+              <option value="qwen">Qwen3:4b local Ollama</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="grid-2">
           <label for="executor">
             Reservation executor
             <select id="executor">
@@ -385,13 +458,23 @@
 
         <div class="actions">
           <button id="runButton">Run agent</button>
+          <button id="runBatchButton" class="blue">Run selected contexts</button>
           <button id="gmailButton" class="blue">Load Gmail</button>
+          <button id="useMailButton" class="secondary">Use selected mail</button>
           <a id="openTarget" class="button naver" target="_blank" rel="noreferrer">Open target</a>
           <a id="openMock" class="button secondary" target="_blank" rel="noreferrer" href="/demo/recording_reservation_site.html">Open mock</a>
           <button id="resetButton" class="secondary">Reset</button>
         </div>
 
         <div id="status" class="status">대기 중입니다.</div>
+
+        <div class="mail-panel">
+          <h2>Mail context</h2>
+          <p class="sub">Gmail에서 불러온 메일을 약속 단위로 묶어 보여줍니다. 실행에 넣을 context만 선택할 수 있습니다.</p>
+          <div id="mailList" class="mail-list">
+            <div class="mail-item"><span></span><div><strong>선택된 Gmail context 없음</strong><div class="mail-meta">Load Gmail을 누르면 후보가 표시됩니다.</div></div></div>
+          </div>
+        </div>
       </section>
 
       <aside class="pane">
@@ -440,6 +523,27 @@
           </div>
 
           <div class="card">
+            <strong>Multiple appointments</strong>
+            <div id="batchResults" class="batch-results">
+              <div class="mail-meta">여러 context를 선택해 실행하면 약속별 결과가 여기에 표시됩니다.</div>
+            </div>
+          </div>
+
+          <div class="card chat-panel">
+            <strong>Chatbot</strong>
+            <div id="chatLog" class="chat-log">
+              <div class="chat-message agent">Agent 실행 결과나 선택한 메일 context에 대해 질문할 수 있습니다.</div>
+            </div>
+            <label for="chatInput">
+              Question
+              <input id="chatInput" placeholder="예: 어떤 시간이 선택됐어? 예약 상태는?" />
+            </label>
+            <div class="actions">
+              <button id="chatButton" class="secondary">Ask</button>
+            </div>
+          </div>
+
+          <div class="card">
             <strong>Raw JSON</strong>
             <pre id="raw" class="raw">{}</pre>
           </div>
@@ -458,9 +562,14 @@
       const reservationTarget = document.querySelector("#reservationTarget");
       const executor = document.querySelector("#executor");
       const runButton = document.querySelector("#runButton");
+      const runBatchButton = document.querySelector("#runBatchButton");
       const gmailButton = document.querySelector("#gmailButton");
+      const useMailButton = document.querySelector("#useMailButton");
       const resetButton = document.querySelector("#resetButton");
+      const chatButton = document.querySelector("#chatButton");
       const statusBox = document.querySelector("#status");
+      let gmailGroups = [];
+      let latestResult = null;
 
       function inferTargetFromInput() {
         if (executor.value.startsWith("mock")) return MOCK_URL;
@@ -486,7 +595,12 @@
       }
 
       function escapeText(value) {
-        return String(value ?? "");
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
       }
 
       function setKv(id, rows) {
@@ -496,6 +610,7 @@
 
       function setRunning(isRunning) {
         runButton.disabled = isRunning;
+        runBatchButton.disabled = isRunning;
         runButton.textContent = isRunning ? "Running..." : "Run agent";
       }
 
@@ -554,16 +669,74 @@
             statusBox.textContent = data.message || "최근 3일 내 일정 관련 Gmail을 찾지 못했습니다.";
             return;
           }
-          emailText.value = data.email_text;
+          gmailGroups = data.groups || [];
+          renderMailGroups(gmailGroups);
+          syncSelectedMailToText();
           const subjects = (data.messages || [])
             .slice(0, 3)
             .map((item) => item.subject)
             .join(" / ");
-          statusBox.textContent = `최근 3일 일정 관련 Gmail ${(data.messages || []).length}개를 불러왔습니다. ${subjects}`;
+          statusBox.textContent = `최근 3일 일정 관련 Gmail ${(data.messages || []).length}개를 ${gmailGroups.length}개 약속 context로 묶었습니다. ${subjects}`;
           syncLinks();
         } finally {
           gmailButton.disabled = false;
         }
+      }
+
+      function renderMailGroups(groups) {
+        const node = document.querySelector("#mailList");
+        if (!groups.length) {
+          node.innerHTML =
+            '<div class="mail-item"><span></span><div><strong>일정 관련 메일 없음</strong><div class="mail-meta">검색 기간을 늘리거나 직접 입력해주세요.</div></div></div>';
+          return;
+        }
+        node.innerHTML = groups
+          .map(
+            (group, index) => `
+              <label class="mail-item">
+                <input type="checkbox" class="mail-check" data-index="${index}" checked />
+                <div>
+                  <strong>${escapeText(group.title)}</strong>
+                  <div class="mail-meta">${group.count} mail(s) | score ${group.schedule_score} | ${escapeText(
+              (group.dates || []).filter(Boolean).slice(0, 2).join(" / ")
+            )}</div>
+                  <div class="mail-meta">${escapeText((group.subjects || []).slice(0, 2).join(" / "))}</div>
+                </div>
+              </label>`
+          )
+          .join("");
+      }
+
+      function selectedAppointmentContexts() {
+        return [...document.querySelectorAll(".mail-check:checked")]
+          .map((node) => gmailGroups[Number(node.dataset.index)])
+          .filter(Boolean)
+          .map((group) => ({
+            id: group.id,
+            title: group.title,
+            email_text: group.email_text,
+            message_ids: group.message_ids || [],
+            selected_date: document.querySelector("#selectedDate").value,
+          }));
+      }
+
+      function syncSelectedMailToText() {
+        const contexts = selectedAppointmentContexts();
+        if (!contexts.length) return;
+        emailText.value = contexts.map((item) => item.email_text).join("\n\n---\n\n");
+        syncLinks();
+      }
+
+      function basePayload() {
+        return {
+          reference_date: document.querySelector("#referenceDate").value,
+          selected_date: document.querySelector("#selectedDate").value,
+          llm_provider: document.querySelector("#llmProvider").value,
+          executor: executor.value,
+          naver_url: naverUrlInput.value.trim(),
+          place_provider: document.querySelector("#placeProvider").value,
+          calendar_source: document.querySelector("#calendarSource").value,
+        };
       }
 
       async function runAgent() {
@@ -578,12 +751,8 @@
         statusBox.textContent = "Agent workflow 실행 중입니다.";
 
         const payload = {
+          ...basePayload(),
           email_text: emailText.value,
-          reference_date: document.querySelector("#referenceDate").value,
-          executor: executor.value,
-          naver_url: naverUrlInput.value.trim(),
-          place_provider: document.querySelector("#placeProvider").value,
-          calendar_source: document.querySelector("#calendarSource").value,
         };
 
         try {
@@ -593,10 +762,40 @@
             body: JSON.stringify(payload),
           });
           const data = await response.json();
+          latestResult = data;
           renderResult(data);
           statusBox.textContent = response.ok ? "완료되었습니다." : `실행 오류: ${data.error || response.status}`;
         } catch (error) {
           statusBox.textContent = `API 호출 실패: ${error}`;
+        } finally {
+          setRunning(false);
+        }
+      }
+
+      async function runBatch() {
+        syncSelectedMailToText();
+        setRunning(true);
+        statusBox.textContent = "선택한 context를 약속별로 분기 실행 중입니다.";
+        const payload = {
+          ...basePayload(),
+          email_text: emailText.value,
+          appointment_contexts: selectedAppointmentContexts(),
+        };
+        try {
+          const response = await fetch("/api/run_batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          latestResult = data;
+          renderBatchResult(data);
+          if ((data.appointments || [])[0]) renderResult(data.appointments[0]);
+          statusBox.textContent = response.ok
+            ? `${data.num_appointments || 0}개 약속 처리가 완료되었습니다.`
+            : `실행 오류: ${data.error || response.status}`;
+        } catch (error) {
+          statusBox.textContent = `Batch API 호출 실패: ${error}`;
         } finally {
           setRunning(false);
         }
@@ -616,6 +815,7 @@
 
         setKv("extraction", [
           ["provider", data.provider || ""],
+          ["reference date", [data.reference_date || "", data.reference_date_source || ""].filter(Boolean).join(" / ")],
           ["participants", (extraction.participants || []).join(", ")],
           ["location", extraction.location_preference || ""],
           ["summary", extraction.source_summary || ""],
@@ -648,9 +848,74 @@
         document.querySelector("#raw").textContent = JSON.stringify(data, null, 2);
       }
 
+      function renderBatchResult(data) {
+        const node = document.querySelector("#batchResults");
+        const appointments = data.appointments || [];
+        if (!appointments.length) {
+          node.innerHTML = '<div class="mail-meta">처리된 약속이 없습니다.</div>';
+          return;
+        }
+        node.innerHTML = appointments
+          .map((item, index) => {
+            const recommendation = item.recommendation || {};
+            const selected = (recommendation.selected || {}).candidate || {};
+            const reservation = item.reservation_result || {};
+            const place = ((item.place_recommendation || {}).selected || {}).name || "";
+            return `<div class="batch-item">
+              <span class="tag ${escapeText(reservation.status || "")}">${escapeText(reservation.status || "")}</span>
+              <div><strong>${index + 1}. ${escapeText(item.appointment_title || item.appointment_id)}</strong>
+              <div class="kv">
+                <b>time</b><span>${escapeText(selected.start || "")}</span>
+                <b>place</b><span>${escapeText(place)}</span>
+                <b>reservation</b><span>${escapeText(reservation.status || "")}</span>
+              </div></div>
+            </div>`;
+          })
+          .join("");
+      }
+
+      async function askChatbot() {
+        const input = document.querySelector("#chatInput");
+        const question = input.value.trim();
+        if (!question) return;
+        appendChat("user", question);
+        input.value = "";
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question,
+              llm_provider: document.querySelector("#llmProvider").value,
+              context: latestResult || { email_text: emailText.value, appointment_contexts: selectedAppointmentContexts() },
+            }),
+          });
+          const data = await response.json();
+          appendChat("agent", data.answer || data.error || "답변을 생성하지 못했습니다.");
+        } catch (error) {
+          appendChat("agent", `Chat API 호출 실패: ${error}`);
+        }
+      }
+
+      function appendChat(role, text) {
+        const node = document.querySelector("#chatLog");
+        const item = document.createElement("div");
+        item.className = `chat-message ${role}`;
+        item.textContent = text;
+        node.appendChild(item);
+        node.scrollTop = node.scrollHeight;
+      }
+
       resetButton.addEventListener("click", () => window.location.reload());
       runButton.addEventListener("click", runAgent);
+      runBatchButton.addEventListener("click", runBatch);
       gmailButton.addEventListener("click", loadGmail);
+      useMailButton.addEventListener("click", syncSelectedMailToText);
+      chatButton.addEventListener("click", askChatbot);
+      document.querySelector("#chatInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") askChatbot();
+      });
+      document.querySelector("#mailList").addEventListener("change", syncSelectedMailToText);
       executor.addEventListener("change", syncLinks);
       emailText.addEventListener("input", syncLinks);
       naverUrlInput.addEventListener("input", syncLinks);

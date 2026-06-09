@@ -10,8 +10,14 @@ from .graph import build_extraction_graph
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the LangGraph e-mail extraction workflow.")
     parser.add_argument("--sample", required=True, help="Path to an email thread text file.")
-    parser.add_argument("--reference-date", default=None, help="Reference date for relative time expressions.")
+    parser.add_argument(
+        "--reference-date",
+        default=None,
+        help="Reference date for relative time expressions. Use auto or omit it to infer from the e-mail.",
+    )
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for normalization.")
+    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--selected-date", default=None, help="Preferred meeting date in YYYY-MM-DD format.")
     parser.add_argument("--calendar", default=None, help="Optional path to a synthetic calendar JSON file.")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default=None)
     parser.add_argument("--place-search-html", default=None, help="Optional static HTML place search result file.")
@@ -27,6 +33,8 @@ def main() -> None:
             "email_text": Path(args.sample).read_text(encoding="utf-8"),
             "reference_date": args.reference_date,
             "timezone": args.timezone,
+            "llm_provider": args.llm_provider,
+            "selected_date": args.selected_date,
             "calendar_path": args.calendar,
             "place_provider": args.place_provider,
             "place_search_html": args.place_search_html,
@@ -41,6 +49,9 @@ def main() -> None:
     output = {
         "provider": result.get("provider"),
         "error": result.get("error"),
+        "reference_date": result.get("reference_date"),
+        "reference_date_source": result.get("reference_date_source"),
+        "reference_date_error": result.get("reference_date_error"),
         "extraction": extraction,
         "recommendation": result["recommendation"].model_dump() if result.get("recommendation") else None,
         "place_recommendation": result["place_recommendation"].model_dump() if result.get("place_recommendation") else None,
