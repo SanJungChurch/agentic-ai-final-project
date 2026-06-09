@@ -21,13 +21,47 @@ from src.email_agent.google_workspace import (
     google_workspace_status,
 )
 from src.email_agent.graph import build_extraction_graph
+from src.email_agent.json_utils import parse_json_object
 from src.email_agent.llm_extractor import create_constraint_extractor
-from src.email_agent.reply_generator import generate_reply_draft_with_llm
+from src.email_agent.place_retriever import provider_from_name, recommend_place
+from src.email_agent.reservation_executor import executor_from_name, reserve_selected_place
+from src.email_agent.schema import ExtractionResult, Intent, PlaceCandidate, PlaceRecommendation, ScheduleRecommendation
 
 
 DEFAULT_NAVER_BOOKING_URL = (
     "https://map.naver.com/p/search/%EC%98%88%EC%95%BD%20%EA%B0%80%EB%8A%A5%20%EC%9E%A5%EC%86%8C"
 )
+CHAT_TOOL_RETRY_LIMIT = 3
+CHAT_ALLOWED_ACTIONS = {"answer", "search_place", "reserve_place"}
+CHAT_QUERY_NOISE_PATTERNS = [
+    r"예약\s*가능한?",
+    r"가능한?",
+    r"식사\s*할\s*만한",
+    r"밥\s*먹을\s*만한",
+    r"먹을\s*만한",
+    r"회의\s*후",
+    r"끝나고",
+    r"근처",
+    r"주변",
+]
+CHAT_QUERY_NOISE_TOKENS = [
+    "저녁",
+    "점심",
+    "아침",
+    "오전",
+    "오후",
+    "밤",
+    "낮",
+    "새벽",
+    "식사",
+    "밥",
+    "검색",
+    "찾기",
+    "추천",
+    "장소",
+    "예약",
+    "가능",
+]
 
 
 class DemoServer(ThreadingHTTPServer):
@@ -95,7 +129,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/chat":
             try:
                 payload = self._read_json()
-                self._send_json(answer_chat(payload))
+                self._send_json(answer_chat(payload, self.server))
             except Exception as exc:
                 self._send_json({"error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
@@ -352,7 +386,7 @@ def split_appointment_contexts(email_text: str) -> list[dict]:
     ]
 
 
-def answer_chat(payload: dict) -> dict:
+def answer_chat(payload: dict, server: DemoServer | None = None) -> dict:
     question = (payload.get("question") or "").strip()
     context = payload.get("context") or {}
     llm_model = payload.get("llm_model")
@@ -362,23 +396,205 @@ def answer_chat(payload: dict) -> dict:
     try:
         model = llm_model if llm_model and "EXAONE" in llm_model.upper() else None
         extractor = create_constraint_extractor("exaone", model=model)
-        answer = extractor.generate_text(_build_chat_prompt(question, context))
+        action = _plan_chat_action(extractor, question, context)
+        tool_result = _execute_chat_action(action, context, payload)
+        answer = _clean_chat_final_answer(extractor.generate_text(_build_chat_prompt(question, context, action, tool_result)))
         return {
             "answer": answer,
             "source": getattr(extractor, "provider_name", "llm"),
             "llm_model": getattr(extractor, "model_name", llm_model),
+            "tool_calls": [action] if action["action"] != "answer" else [],
+            "tool_result": tool_result,
         }
     except Exception as exc:
         return {"answer": "", "source": "exaone", "error": f"{type(exc).__name__}: {exc}"}
 
 
-def _build_chat_prompt(question: str, context: dict) -> str:
-    compact_context = json.dumps(_compact_chat_context(context), ensure_ascii=False, indent=2)
-    return f"""You are a concise Korean chatbot for an e-mail scheduling agent demo.
+def _plan_chat_action(extractor, question: str, context: dict) -> dict:
+    errors: list[str] = []
+    for attempt in range(1, CHAT_TOOL_RETRY_LIMIT + 1):
+        prompt = _build_chat_action_prompt(question, context, errors)
+        try:
+            data = parse_json_object(extractor.generate_text(prompt))
+            return _validate_chat_action(data)
+        except Exception as exc:
+            errors.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+    raise TimeoutError(f"chat tool planning failed after {CHAT_TOOL_RETRY_LIMIT} EXAONE attempts. {' | '.join(errors)}")
 
-Answer only from the provided context. If the context is insufficient, say what is missing.
-Never claim a reservation succeeded when reservation_status is failed, skipped, needs_manual_action, or missing.
-Keep the answer short and practical.
+
+def _validate_chat_action(data: dict) -> dict:
+    action = str(data.get("action") or "").strip()
+    if action not in CHAT_ALLOWED_ACTIONS:
+        raise ValueError(f"unsupported chat action: {action}")
+
+    reason = str(data.get("reason") or "").strip()
+    if action == "answer":
+        return {"action": "answer", "query": None, "reason": reason}
+
+    if action == "reserve_place":
+        return {"action": "reserve_place", "query": None, "reason": reason}
+
+    query = _clean_chat_tool_query(data.get("query"))
+    if not query:
+        raise ValueError("search_place requires a non-empty Korean query.")
+    return {"action": "search_place", "query": query, "reason": reason}
+
+
+def _clean_chat_tool_query(value) -> str:
+    query = str(value or "").strip()
+    if not query or len(query) > 60:
+        return ""
+    if any(char in query for char in ["\n", "\r", "\t", "{", "}", "[", "]"]):
+        return ""
+    lowered = query.lower()
+    if any(token in lowered for token in ["meeting room", "search", "booking"]):
+        return ""
+    for pattern in CHAT_QUERY_NOISE_PATTERNS:
+        query = re.sub(pattern, " ", query)
+    for token in CHAT_QUERY_NOISE_TOKENS:
+        query = query.replace(token, " ")
+    return " ".join(query.split())
+
+
+def _execute_chat_action(action: dict, context: dict, payload: dict) -> dict | None:
+    if action["action"] == "answer":
+        return None
+    if action["action"] == "search_place":
+        return _search_place_tool(action["query"])
+    if action["action"] == "reserve_place":
+        return _reserve_chat_selected_place(context, payload)
+    raise ValueError(f"unsupported chat action: {action['action']}")
+
+
+def _search_place_tool(query: str) -> dict:
+    provider = provider_from_name("kakao")
+    extraction = ExtractionResult(
+        intent=Intent.SCHEDULE_MEETING,
+        location_preference=query,
+        source_summary="chatbot requested an additional place search",
+    )
+    recommendation = recommend_place(extraction, provider=provider, query_override=query)
+    return {
+        "tool": "search_place",
+        "query": recommendation.query,
+        "status": recommendation.status,
+        "summary": recommendation.summary,
+        "selected": recommendation.selected.model_dump() if recommendation.selected else None,
+        "candidates": [candidate.model_dump() for candidate in recommendation.candidates[:5]],
+    }
+
+
+def _reserve_chat_selected_place(context: dict, payload: dict) -> dict:
+    extraction = _chat_extraction(context)
+    recommendation = _chat_schedule_recommendation(context)
+    place_recommendation, place_source = _chat_place_recommendation(context)
+    selected_place = place_recommendation.selected if place_recommendation else None
+    reservation_target = (selected_place.source_url or "").strip() if selected_place else ""
+    if not reservation_target:
+        reservation_target = (payload.get("naver_url") or "").strip() or DEFAULT_NAVER_BOOKING_URL
+
+    executor_name = payload.get("executor") or "naver-visible"
+    target, runner_command = _chat_reservation_runner_config(executor_name, reservation_target)
+    executor = executor_from_name("showui", target=target, runner_command=runner_command)
+    result = reserve_selected_place(extraction, recommendation, place_recommendation, executor=executor)
+    return {
+        "tool": "reserve_place",
+        "status": result.status,
+        "reservation_target": target,
+        "reservation_target_source": place_source,
+        "selected_place": selected_place.model_dump() if selected_place else None,
+        "reservation_result": result.model_dump(),
+    }
+
+
+def _chat_extraction(context: dict) -> ExtractionResult:
+    data = context.get("extraction") or {}
+    if data:
+        return ExtractionResult.model_validate(data)
+    return ExtractionResult(
+        intent=Intent.SCHEDULE_MEETING,
+        participants=[],
+        source_summary="chatbot reservation request",
+    )
+
+
+def _chat_schedule_recommendation(context: dict) -> ScheduleRecommendation | None:
+    data = context.get("recommendation") or {}
+    if not data:
+        return None
+    return ScheduleRecommendation.model_validate(data)
+
+
+def _chat_place_recommendation(context: dict) -> tuple[PlaceRecommendation | None, str]:
+    chat_tool = context.get("chat_tool_result") or context.get("last_chat_tool_result") or {}
+    if chat_tool.get("tool") == "search_place" and chat_tool.get("selected"):
+        selected = PlaceCandidate.model_validate(chat_tool["selected"])
+        candidates = [
+            PlaceCandidate.model_validate(candidate)
+            for candidate in chat_tool.get("candidates", [])
+            if isinstance(candidate, dict)
+        ]
+        if selected.name not in {candidate.name for candidate in candidates}:
+            candidates.insert(0, selected)
+        return (
+            PlaceRecommendation(
+                query=chat_tool.get("query") or selected.name,
+                candidates=candidates,
+                selected=selected,
+                status="selected",
+                summary=chat_tool.get("summary") or "챗봇이 선택한 장소입니다.",
+            ),
+            "chat_kakao_selected_place",
+        )
+
+    place = context.get("place_recommendation") or {}
+    if place.get("selected"):
+        return PlaceRecommendation.model_validate(place), "agent_selected_place"
+    return None, "missing_selected_place"
+
+
+def _chat_reservation_runner_config(executor_name: str, reservation_target: str) -> tuple[str, str]:
+    if executor_name in {"mock-visible", "mock-headless"}:
+        target = (PROJECT_ROOT / "demo" / "recording_reservation_site.html").resolve().as_uri()
+        headless_flag = " --headless" if executor_name == "mock-headless" else ""
+        return target, f"{sys.executable} scripts/showui_reservation_runner.py{headless_flag} --dom-fallback"
+
+    headless_flag = " --headless" if executor_name == "naver-headless" else ""
+    target = reservation_target or DEFAULT_NAVER_BOOKING_URL
+    return target, f"{sys.executable} scripts/showui_reservation_runner.py{headless_flag} --showui-source local"
+
+
+def _build_chat_action_prompt(question: str, context: dict, errors: list[str] | None = None) -> str:
+    compact_context = json.dumps(_compact_chat_context(context), ensure_ascii=False, indent=2)
+    error_text = "\n".join(errors or [])
+    return f"""You are a tool router for an e-mail scheduling agent chatbot.
+
+Decide whether the user only needs an answer from context or whether the chatbot must call a tool.
+
+Allowed actions:
+- answer: answer from the existing context. Use this for status, selected time, selected place, reservation result, or reply draft questions.
+- search_place: call Kakao Local place search. Use this when the user asks to find another place, a meal/restaurant/cafe/study room near the meeting location, or an after-meeting place.
+- reserve_place: call ShowUI reservation for the currently selected place. Use this when the user asks to reserve/book the place that was just selected or searched.
+
+Rules for search_place:
+- query must be natural Korean only.
+- Do not include English words such as "meeting room", "search", or "booking".
+- Do not include meta words such as "검색" or "찾기".
+- Do not include meal-time or intent words such as "저녁", "점심", "아침", "식사", "예약", "가능", "추천", or "장소".
+- Use only the area plus the venue category, such as "경희대 식당", "경희대 카페", "명지대 회의실", "홍대 식당".
+- Infer the area from context when possible. If context has location_preference "경희대" and the user asks for dinner, use "경희대 식당".
+- If the user asks for dinner near "인하대학교", the query must be "인하대학교 식당", not "인하대학교 저녁 식당".
+
+Rules for reserve_place:
+- Use reserve_place when the user says "예약해줘", "예약도 진행해줘", "그 식당 예약해줘", or asks to book the currently selected/searched place.
+- If context has chat_tool = "search_place" and chat_selected_place exists, reserve that chat-selected place.
+- Do not switch back to an older agent-selected place when the user asks to reserve the place found in the chat.
+
+Return JSON only:
+{{"action": "answer or search_place or reserve_place", "query": "Korean query or null", "reason": "short Korean reason"}}
+
+Previous invalid attempts:
+{error_text or "none"}
 
 Context:
 {compact_context}
@@ -386,6 +602,68 @@ Context:
 User question:
 {question}
 """
+
+
+def _build_chat_prompt(question: str, context: dict, action: dict | None = None, tool_result: dict | None = None) -> str:
+    compact_context = json.dumps(_compact_chat_context(context), ensure_ascii=False, indent=2)
+    action_text = json.dumps(action or {"action": "answer"}, ensure_ascii=False, indent=2)
+    tool_text = json.dumps(tool_result or {}, ensure_ascii=False, indent=2)
+    return f"""You are a concise Korean chatbot for an e-mail scheduling agent demo.
+
+Answer only from the provided context. If the context is insufficient, say what is missing.
+Never claim a reservation succeeded when reservation_status is failed, skipped, needs_manual_action, or missing.
+If a tool result is provided, use it directly. If search_place found candidates, summarize the selected place and 2 alternatives if available.
+Do not claim that a newly searched place was reserved. Say it was only searched unless a reservation_result says confirmed.
+If reserve_place was called, report the exact reservation_result.status from the tool result.
+For reserve_place status failed, skipped, or needs_manual_action, clearly say the reservation was not completed and the user must complete it manually from the opened target page.
+Return plain Korean prose only.
+Do not output JSON, Markdown, code fences, or key-value blocks.
+Never wrap the answer in ```json or any other fenced block.
+Keep the answer short and practical.
+
+Context:
+{compact_context}
+
+Planned action:
+{action_text}
+
+Tool result:
+{tool_text}
+
+User question:
+{question}
+"""
+
+
+def _clean_chat_final_answer(answer: str) -> str:
+    text = str(answer or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        data = parse_json_object(text)
+    except ValueError:
+        return text
+
+    for key in ["response", "answer", "message"]:
+        if isinstance(data.get(key), str) and data[key].strip():
+            return data[key].strip()
+
+    selected_place = data.get("selected_place")
+    alternatives = data.get("alternatives")
+    if selected_place:
+        lines = [f"{selected_place}을(를) 우선 후보로 찾았습니다."]
+        if isinstance(alternatives, list) and alternatives:
+            alt_names = [
+                item.get("name") if isinstance(item, dict) else str(item)
+                for item in alternatives[:2]
+            ]
+            alt_names = [name for name in alt_names if name]
+            if alt_names:
+                lines.append("대안으로는 " + ", ".join(alt_names) + "도 있습니다.")
+        return " ".join(lines)
+
+    return text
 
 
 def _compact_chat_context(context: dict) -> dict:
@@ -414,6 +692,8 @@ def _compact_single_result(item: dict) -> dict:
     selected = recommendation.get("selected") or {}
     place = item.get("place_recommendation") or {}
     reservation = item.get("reservation_result") or {}
+    chat_tool = item.get("chat_tool_result") or {}
+    chat_selected = chat_tool.get("selected") or {}
     return {
         "title": item.get("appointment_title") or item.get("appointment_id"),
         "participants": extraction.get("participants"),
@@ -421,6 +701,9 @@ def _compact_single_result(item: dict) -> dict:
         "selected_time": (selected.get("candidate") or {}).get("start"),
         "schedule_summary": recommendation.get("summary"),
         "place": (place.get("selected") or {}).get("name"),
+        "chat_tool": chat_tool.get("tool"),
+        "chat_selected_place": chat_selected.get("name"),
+        "chat_selected_place_url": chat_selected.get("source_url"),
         "reservation_status": reservation.get("status"),
         "reservation_message": reservation.get("message"),
         "reply_draft": (item.get("reply_draft") or {}).get("body"),

@@ -575,6 +575,7 @@
       const statusBox = document.querySelector("#status");
       let gmailGroups = [];
       let latestResult = null;
+      let lastChatToolResult = null;
 
       function inferTargetFromInput() {
         if (executor.value.startsWith("mock")) return MOCK_URL;
@@ -924,10 +925,9 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...basePayload(),
               question,
-              llm_provider: document.querySelector("#llmProvider").value,
-              llm_model: document.querySelector("#llmModel").value.trim(),
-              context: latestResult || { email_text: emailText.value, appointment_contexts: selectedAppointmentContexts() },
+              context: buildChatContext(),
             }),
           });
           const data = await response.json();
@@ -935,10 +935,75 @@
             appendChat("agent", "Chat endpoint를 찾지 못했습니다. 데모 서버가 이전 코드로 실행 중일 수 있으니 서버를 재시작한 뒤 새로고침해주세요.");
             return;
           }
-          appendChat("agent", data.answer || data.error || "답변을 생성하지 못했습니다.");
+          applyChatToolResult(data);
+          appendChat("agent", formatChatResponse(data));
         } catch (error) {
           appendChat("agent", `Chat API 호출 실패: ${error}`);
         }
+      }
+
+      function buildChatContext() {
+        const baseContext = latestResult
+          ? JSON.parse(JSON.stringify(latestResult))
+          : { email_text: emailText.value, appointment_contexts: selectedAppointmentContexts() };
+        if (lastChatToolResult) {
+          baseContext.chat_tool_result = lastChatToolResult;
+        }
+        return baseContext;
+      }
+
+      function applyChatToolResult(data) {
+        const toolResult = data.tool_result || null;
+        if (!toolResult || !toolResult.tool) return;
+
+        if (toolResult.tool === "search_place") {
+          lastChatToolResult = toolResult;
+          return;
+        }
+
+        if (toolResult.tool === "reserve_place") {
+          latestResult = latestResult || {};
+          latestResult.reservation_target = toolResult.reservation_target || latestResult.reservation_target;
+          latestResult.reservation_target_source =
+            toolResult.reservation_target_source || latestResult.reservation_target_source;
+          latestResult.reservation_result = toolResult.reservation_result || latestResult.reservation_result;
+          if (toolResult.selected_place) {
+            latestResult.place_recommendation = {
+              ...(latestResult.place_recommendation || {}),
+              query: (lastChatToolResult || {}).query || toolResult.selected_place.name,
+              status: "selected",
+              selected: toolResult.selected_place,
+              candidates: [toolResult.selected_place],
+              summary: "챗봇이 선택한 장소입니다.",
+            };
+          }
+          renderResult(latestResult);
+        }
+      }
+
+      function formatChatResponse(data) {
+        const answer = data.answer || data.error || "답변을 생성하지 못했습니다.";
+        const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
+        const toolResult = data.tool_result || null;
+        const lines = [answer];
+        toolCalls.forEach((call) => {
+          if (call.action === "search_place") {
+            lines.push(`[tool] Kakao 장소검색: ${call.query || ""}`);
+          } else if (call.action === "reserve_place") {
+            lines.push("[tool] ShowUI 예약 실행");
+          }
+        });
+        if (toolResult && toolResult.tool === "search_place" && toolResult.status) {
+          const selected = toolResult.selected || {};
+          const selectedText = selected.name ? ` / selected: ${selected.name}` : "";
+          lines.push(`[result] ${toolResult.status}${selectedText}`);
+        } else if (toolResult && toolResult.tool === "reserve_place") {
+          const reservation = toolResult.reservation_result || {};
+          const place = toolResult.selected_place || {};
+          const selectedText = place.name ? ` / selected: ${place.name}` : "";
+          lines.push(`[result] ${reservation.status || toolResult.status || ""}${selectedText}`);
+        }
+        return lines.filter(Boolean).join("\n");
       }
 
       function appendChat(role, text) {
