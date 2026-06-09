@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.email_agent.graph import apply_selected_date_to_candidates, build_extraction_graph, infer_place_search_query
+from src.email_agent.graph import (
+    apply_selected_date_to_candidates,
+    build_extraction_graph,
+    infer_place_search_query,
+    resolve_reservation_target,
+)
 
 
 class GraphTest(unittest.TestCase):
@@ -97,10 +102,11 @@ class GraphTest(unittest.TestCase):
                         "reference_date": "auto",
                         "timezone": "Asia/Seoul",
                         "llm_provider": "qwen",
+                        "llm_model": "qwen3:4b",
                     }
                 )
 
-        factory_mock.assert_any_call("qwen")
+        factory_mock.assert_any_call("qwen", model="qwen3:4b")
         extractor_mock.extract.assert_called_once()
         self.assertEqual(result["provider"], "ollama")
         self.assertEqual(result["reference_date"], "2026-05-26")
@@ -140,6 +146,22 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(infer_place_search_query(meal), "강남역 식당 예약")
         self.assertEqual(infer_place_search_query(advising), "숭실대 조용한 회의실 예약")
         self.assertEqual(infer_place_search_query(explicit_cafe), "숭실대 카페 예약")
+
+    def test_auto_reservation_target_uses_selected_place_url(self) -> None:
+        from src.email_agent.schema import PlaceCandidate, PlaceRecommendation
+
+        selected_url = "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%8B%9D%EB%8B%B9"
+        state = {
+            "reservation_target": "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98",
+            "reservation_target_auto": True,
+            "place_recommendation": PlaceRecommendation(
+                query="숭실대 식당 예약",
+                status="selected",
+                selected=PlaceCandidate(name="숭실대 예약 식당", source_url=selected_url),
+            ),
+        }
+
+        self.assertEqual(resolve_reservation_target(state), selected_url)
 
 
 if __name__ == "__main__":

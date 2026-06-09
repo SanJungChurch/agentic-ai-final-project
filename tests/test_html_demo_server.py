@@ -1,6 +1,13 @@
 import unittest
 
-from scripts.serve_html_demo import group_gmail_messages, place_from_reservation_target, split_appointment_contexts
+from scripts.serve_html_demo import (
+    answer_chat,
+    group_gmail_messages,
+    infer_location_query,
+    infer_naver_url,
+    place_from_reservation_target,
+    split_appointment_contexts,
+)
 
 
 class HtmlDemoServerTest(unittest.TestCase):
@@ -49,6 +56,32 @@ class HtmlDemoServerTest(unittest.TestCase):
         self.assertEqual(place.source_url, url)
         self.assertIn("숭실대 카페", place.name)
         self.assertEqual(place.category, "naver_booking")
+
+    def test_infer_naver_url_uses_venue_type_from_email(self) -> None:
+        text = "숭실대 근처 음식점에서 점심 약속을 잡아줘"
+
+        self.assertIn("%EC%8B%9D%EB%8B%B9", infer_naver_url(text))
+        self.assertEqual(infer_location_query(text), "숭실대 식당 예약")
+
+    def test_chat_answers_reservation_failure_from_context_without_llm(self) -> None:
+        answer = answer_chat(
+            {
+                "question": "reservation status?",
+                "llm_provider": "qwen",
+                "context": {
+                    "reservation_result": {
+                        "status": "failed",
+                        "failure_reason": "slot_unavailable",
+                        "message": "No matching reservation slot was found.",
+                    },
+                    "extraction": {"participants": ["A", "B"]},
+                },
+            }
+        )
+
+        self.assertEqual(answer["source"], "context")
+        self.assertIn("실패했습니다", answer["answer"])
+        self.assertIn("slot_unavailable", answer["answer"])
 
 
 if __name__ == "__main__":

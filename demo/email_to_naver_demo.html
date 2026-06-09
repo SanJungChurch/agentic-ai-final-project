@@ -418,6 +418,10 @@
               <option value="qwen">Qwen3:4b local Ollama</option>
             </select>
           </label>
+          <label for="llmModel">
+            Ollama model
+            <input id="llmModel" value="qwen3:4b" />
+          </label>
         </div>
 
         <div class="grid-2">
@@ -575,17 +579,49 @@
         if (executor.value.startsWith("mock")) return MOCK_URL;
         const manual = naverUrlInput.value.trim();
         if (manual) return manual;
-        const text = emailText.value.toLowerCase();
-        if (text.includes("강남") || text.includes("gangnam")) {
-          return "https://map.naver.com/p/search/%EA%B0%95%EB%82%A8%20%EC%B9%B4%ED%8E%98";
-        }
-        if (text.includes("홍대") || text.includes("hongdae")) {
-          return "https://map.naver.com/p/search/%ED%99%8D%EB%8C%80%20%EC%B9%B4%ED%8E%98";
-        }
-        if (text.includes("판교") || text.includes("pangyo")) {
-          return "https://map.naver.com/p/search/%ED%8C%90%EA%B5%90%20%EC%B9%B4%ED%8E%98";
-        }
+        const query = inferPlaceQueryFromText(emailText.value);
+        if (query) return naverSearchUrl(query);
         return DEFAULT_NAVER_URL;
+      }
+
+      function naverSearchUrl(query) {
+        return `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
+      }
+
+      function inferPlaceQueryFromText(value) {
+        const text = String(value || "").toLowerCase();
+        const area = areaFromText(text);
+        const venue = venueFromText(text);
+        if (!area && !venue) return "";
+        return `${area || "주변"} ${venue || "장소"} 예약`.trim();
+      }
+
+      function areaFromText(text) {
+        if (text.includes("강남역") || text.includes("gangnam")) return "강남역";
+        if (text.includes("강남")) return "강남";
+        if (text.includes("홍대") || text.includes("hongdae")) return "홍대";
+        if (text.includes("판교") || text.includes("pangyo")) return "판교";
+        if (text.includes("숭실") || text.includes("soongsil")) return "숭실대";
+        for (const area of ["서울대", "신촌", "잠실", "사당"]) {
+          if (text.includes(area)) return area;
+        }
+        return "";
+      }
+
+      function venueFromText(text) {
+        if (["식당", "음식점", "레스토랑", "점심", "저녁", "식사", "밥", "회식", "restaurant", "lunch", "dinner"].some((token) => text.includes(token))) {
+          return "식당";
+        }
+        if (["스터디룸", "스터디", "팀플", "과제", "공부", "study room"].some((token) => text.includes(token))) {
+          return "스터디룸";
+        }
+        if (["회의실", "세미나실", "상담실", "면담", "상담", "인터뷰", "면접", "발표", "세미나"].some((token) => text.includes(token))) {
+          return "회의실";
+        }
+        if (["카페", "커피", "coffee"].some((token) => text.includes(token))) {
+          return "카페";
+        }
+        return "장소";
       }
 
       function syncLinks() {
@@ -771,6 +807,7 @@
           reference_date: document.querySelector("#referenceDate").value,
           selected_date: document.querySelector("#selectedDate").value,
           llm_provider: document.querySelector("#llmProvider").value,
+          llm_model: document.querySelector("#llmModel").value.trim(),
           executor: executor.value,
           naver_url: naverUrlInput.value.trim(),
           place_provider: document.querySelector("#placeProvider").value,
@@ -854,6 +891,7 @@
 
         setKv("extraction", [
           ["provider", data.provider || ""],
+          ["model", data.llm_model || ""],
           ["reference date", [data.reference_date || "", data.reference_date_source || ""].filter(Boolean).join(" / ")],
           ["participants", (extraction.participants || []).join(", ")],
           ["location", extraction.location_preference || ""],
@@ -929,6 +967,7 @@
             body: JSON.stringify({
               question,
               llm_provider: document.querySelector("#llmProvider").value,
+              llm_model: document.querySelector("#llmModel").value.trim(),
               context: latestResult || { email_text: emailText.value, appointment_contexts: selectedAppointmentContexts() },
             }),
           });
@@ -954,8 +993,15 @@
 
       function handleSelectedDateChange() {
         syncSelectedMailToText();
+        syncLinks();
         if (latestResult) {
           statusBox.textContent = "Preferred meeting date가 변경되었습니다. Run agent 또는 Run selected contexts를 다시 실행해주세요.";
+        }
+      }
+
+      function handleReferenceDateChange() {
+        if (latestResult) {
+          statusBox.textContent = "Reference date가 변경되었습니다. Run agent 또는 Run selected contexts를 다시 실행해주세요.";
         }
       }
 
@@ -970,6 +1016,7 @@
       });
       document.querySelector("#mailList").addEventListener("change", syncSelectedMailToText);
       document.querySelector("#selectedDate").addEventListener("change", handleSelectedDateChange);
+      document.querySelector("#referenceDate").addEventListener("change", handleReferenceDateChange);
       executor.addEventListener("change", syncLinks);
       emailText.addEventListener("input", syncLinks);
       naverUrlInput.addEventListener("input", syncLinks);

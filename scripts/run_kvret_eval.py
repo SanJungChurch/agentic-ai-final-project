@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Run Gemini extraction evaluation on the KVRET schedule subset.
+"""Run LLM extraction evaluation on the KVRET schedule subset.
 
 Edit the CONFIG section, then run:
 
@@ -41,14 +41,20 @@ OFFSET = 0
 # Reference date for relative time expressions.
 REFERENCE_DATE = "2026-05-27"
 
-# Timezone passed to the Gemini prompt.
+# Timezone passed to the LLM prompt.
 TIMEZONE = "Asia/Seoul"
 
-# Increase this if you hit Gemini rate limits.
+# Choose one of: "gemini", "ollama", "qwen", "qwen4bmodel".
+LLM_PROVIDER = "qwen"
+
+# Ollama model tag. Use None to read OLLAMA_MODEL/QWEN_MODEL from .env.
+LLM_MODEL = "qwen3:4b"
+
+# Increase this if you hit API rate limits.
 SLEEP_SECONDS = 0.0
 
 # Report output path. The reports/ folder is gitignored.
-OUTPUT_PATH = Path("reports/gemini_kvret_test_100_eval.json")
+OUTPUT_PATH = Path("reports/qwen_kvret_test_100_eval.json")
 
 
 def main() -> None:
@@ -59,6 +65,8 @@ def main() -> None:
         offset=OFFSET,
         reference_date=REFERENCE_DATE,
         timezone=TIMEZONE,
+        llm_provider=LLM_PROVIDER,
+        llm_model=LLM_MODEL,
         sleep_seconds=SLEEP_SECONDS,
     )
 

@@ -235,13 +235,14 @@ class KakaoLocalPlaceProvider:
     def _from_document(self, item: dict[str, Any]) -> PlaceCandidate:
         category = item.get("category_group_name") or item.get("category_name")
         address = item.get("road_address_name") or item.get("address_name")
+        name = item.get("place_name", "")
         return PlaceCandidate(
-            name=item.get("place_name", ""),
+            name=name,
             address=address,
             category=category,
             rating=None,
-            source_url=item.get("place_url"),
-            availability_hint="실시간 예약 가능 여부 확인 필요",
+            source_url=_naver_booking_search_url(name, address),
+            availability_hint="Kakao REST API 후보입니다. Naver Map 예약 페이지에서 예약 가능 여부를 확인해야 합니다.",
         )
 
 
@@ -362,6 +363,15 @@ def _demo_address(area: str) -> str | None:
 
 def _naver_search_url(query: str) -> str:
     return "https://map.naver.com/p/search/" + urllib.parse.quote(query)
+
+
+def _naver_booking_search_url(name: str, address: str | None = None) -> str:
+    query_parts = [name.strip()]
+    if address:
+        query_parts.append(address.strip())
+    query_parts.append("예약")
+    query = " ".join(part for part in query_parts if part)
+    return _naver_search_url(query)
 
 
 def _is_reservation_candidate(candidate: PlaceCandidate) -> bool:

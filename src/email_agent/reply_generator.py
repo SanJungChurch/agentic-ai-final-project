@@ -63,12 +63,20 @@ def generate_reply_draft(
     if reservation_line:
         body += f"\n{reservation_line}"
 
-    body += "\n\n이 시간으로 진행해도 괜찮을까요?\n\n감사합니다."
+    if reservation_result and reservation_result.status == "failed":
+        body += "\n\n따라서 아직 예약은 완료되지 않았습니다. 다른 장소나 시간을 다시 확인해야 합니다.\n\n감사합니다."
+        draft_status = "reservation_failed"
+    elif reservation_result and reservation_result.status == "needs_manual_action":
+        body += "\n\n예약 확정을 위해 로그인 또는 최종 확인이 필요합니다. 이 단계까지 진행한 뒤 확정 여부를 다시 확인하겠습니다.\n\n감사합니다."
+        draft_status = "needs_manual_action"
+    else:
+        body += "\n\n이 시간으로 진행해도 괜찮을까요?\n\n감사합니다."
+        draft_status = "ready"
 
     return ReplyDraft(
         subject="Re: 일정 조율",
         body=body,
-        status="ready",
+        status=draft_status,
         rationale=selected.reasons,
     )
 

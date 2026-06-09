@@ -29,6 +29,7 @@ class ExtractionGraphState(TypedDict, total=False):
     reference_date_error: str | None
     timezone: str
     llm_provider: str | None
+    llm_model: str | None
     selected_date: str | None
     calendar_path: str | None
     place_provider: str | None
@@ -39,6 +40,7 @@ class ExtractionGraphState(TypedDict, total=False):
     reservation_provider: str | None
     reservation_html: str | None
     reservation_target: str | None
+    reservation_target_auto: bool
     showui_runner_command: str | None
     thread: EmailThread
     extraction: ExtractionResult
@@ -100,7 +102,7 @@ def infer_reference_date_node(state: ExtractionGraphState) -> ExtractionGraphSta
         return {**state, "reference_date": reference_date, "reference_date_source": "user"}
 
     try:
-        extractor = create_constraint_extractor(state.get("llm_provider"))
+        extractor = create_graph_extractor(state)
         inferred = extractor.infer_reference_date(
             state["thread"],
             timezone=state.get("timezone", "Asia/Seoul"),
@@ -115,7 +117,7 @@ def infer_reference_date_node(state: ExtractionGraphState) -> ExtractionGraphSta
 def llm_extract_node(state: ExtractionGraphState) -> ExtractionGraphState:
     provider = state.get("llm_provider")
     try:
-        extractor = create_constraint_extractor(provider)
+        extractor = create_graph_extractor(state)
         result = extractor.extract(
             state["thread"],
             reference_date=state.get("reference_date"),
@@ -250,7 +252,7 @@ def generate_place_search_query(state: ExtractionGraphState) -> tuple[str | None
 
     recommendation = state.get("recommendation")
     try:
-        extractor = create_constraint_extractor(state.get("llm_provider"))
+        extractor = create_graph_extractor(state)
         prompt = build_place_search_prompt(
             state["thread"],
             extraction.model_dump_json(),
@@ -326,10 +328,11 @@ def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:
 
     try:
         provider_name = state.get("reservation_provider") or ("html" if state.get("reservation_html") else "mock")
+        reservation_target = resolve_reservation_target(state)
         executor = executor_from_name(
             provider_name,
             html_path=state.get("reservation_html"),
-            target=state.get("reservation_target"),
+            target=reservation_target,
             runner_command=state.get("showui_runner_command"),
         )
         reservation_result = reserve_selected_place(
@@ -338,11 +341,23 @@ def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:
             state.get("place_recommendation"),
             executor=executor,
         )
-        return {**state, "reservation_result": reservation_result}
+        return {**state, "reservation_target": reservation_target, "reservation_result": reservation_result}
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; reservation failed: {exc}" if previous_error else f"reservation failed: {exc}"
         return {**state, "error": error}
+
+
+def resolve_reservation_target(state: ExtractionGraphState) -> str | None:
+    target = state.get("reservation_target")
+    place_recommendation = state.get("place_recommendation")
+    selected_url = None
+    if place_recommendation and place_recommendation.selected:
+        selected_url = place_recommendation.selected.source_url
+
+    if state.get("reservation_target_auto") and selected_url:
+        return selected_url
+    return target or selected_url
 
 
 def generate_reply_node(state: ExtractionGraphState) -> ExtractionGraphState:
@@ -369,3 +384,10 @@ def should_fallback(state: ExtractionGraphState) -> Literal["fallback", "done"]:
     if state.get("error") or not state.get("extraction"):
         return "fallback"
     return "done"
+
+
+def create_graph_extractor(state: ExtractionGraphState):
+    return create_constraint_extractor(
+        state.get("llm_provider"),
+        model=state.get("llm_model"),
+    )

@@ -22,5 +22,15 @@ def load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-        ollama_model=os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+        ollama_model=_ollama_model_from_env(),
+    )
+
+
+def _ollama_model_from_env() -> str:
+    return (
+        os.getenv("OLLAMA_MODEL")
+        or os.getenv("QWEN_MODEL")
+        or os.getenv("QWEN4B_MODEL")
+        or os.getenv("QWEN4BMODEL")
+        or "qwen3:4b"
     )

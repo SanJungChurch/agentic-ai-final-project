@@ -8,7 +8,7 @@ import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,7 +20,7 @@ from src.email_agent.google_workspace import (
     fetch_schedule_related_gmail_texts,
     google_workspace_status,
 )
-from src.email_agent.graph import build_extraction_graph
+from src.email_agent.graph import apply_selected_date_to_candidates, build_extraction_graph
 from src.email_agent.llm_extractor import create_constraint_extractor
 from src.email_agent.place_retriever import provider_from_name, recommend_place
 from src.email_agent.reply_generator import generate_reply_draft
@@ -138,8 +138,11 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
     executor = payload.get("executor") or "naver-visible"
     reference_date = payload.get("reference_date") or args.reference_date
     llm_provider = payload.get("llm_provider") or args.llm_provider
+    llm_model = payload.get("llm_model") or args.llm_model
     place_provider = payload.get("place_provider") or args.place_provider
-    naver_url = payload.get("naver_url") or infer_naver_url(email_text)
+    manual_naver_url = (payload.get("naver_url") or "").strip()
+    naver_url = manual_naver_url or infer_naver_url(email_text)
+    reservation_target_auto = not manual_naver_url and executor in {"naver-visible", "naver-headless"}
     selected_date = payload.get("selected_date") or None
 
     calendar_path = str(PROJECT_ROOT / args.calendar)
@@ -167,32 +170,54 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
                 "reference_date": reference_date,
                 "timezone": args.timezone,
                 "llm_provider": llm_provider,
+                "llm_model": llm_model,
                 "selected_date": selected_date,
                 "calendar_path": calendar_path,
                 "place_provider": place_provider,
                 "place_search_html": str(PROJECT_ROOT / args.place_search_html),
                 "reservation_provider": "showui",
                 "reservation_target": reservation_target,
+                "reservation_target_auto": reservation_target_auto,
                 "showui_runner_command": runner_command,
             }
         )
+        reservation_target = graph_result.get("reservation_target") or reservation_target
         graph_result = apply_demo_schedule_fallback(graph_result, email_text, calendar_path, selected_date)
+        graph_result = refresh_reservation_if_ready(
+            graph_result,
+            reservation_target,
+            reservation_target_auto,
+            runner_command,
+            args.timezone,
+        )
+        reservation_target = graph_result.get("reservation_target") or reservation_target
         graph_result = apply_email_location_override(
             graph_result,
             email_text,
             place_provider,
             args.place_search_html,
             reservation_target,
+            reservation_target_auto,
             runner_command,
             args.timezone,
         )
+        reservation_target = graph_result.get("reservation_target") or reservation_target
+        graph_result = refresh_reservation_if_ready(
+            graph_result,
+            reservation_target,
+            reservation_target_auto,
+            runner_command,
+            args.timezone,
+        )
+        reservation_target = graph_result.get("reservation_target") or reservation_target
         graph_result = align_place_with_reservation_target(
             graph_result,
             reservation_target,
             runner_command,
             args.timezone,
-            force=executor in {"naver-visible", "naver-headless"},
+            force=executor in {"naver-visible", "naver-headless"} and bool(manual_naver_url),
         )
+        reservation_target = graph_result.get("reservation_target") or reservation_target
         return serialize_graph_result(graph_result, payload, reservation_target)
     finally:
         if temp_calendar_path:
@@ -238,6 +263,7 @@ def apply_demo_schedule_fallback(
     if not demo_extraction.candidate_times:
         return graph_result
 
+    demo_extraction = apply_selected_date_to_candidates(demo_extraction, selected_date)
     recommendation = recommend_time(demo_extraction, load_calendar(calendar_path), preferred_date=selected_date)
     updated = dict(graph_result)
     updated["extraction"] = demo_extraction
@@ -332,6 +358,7 @@ def _find_all_speakers(email_text: str, keyword: str) -> list[str]:
 def serialize_graph_result(graph_result: dict, payload: dict, reservation_target: str) -> dict:
     return {
         "provider": graph_result.get("provider"),
+        "llm_model": graph_result.get("llm_model"),
         "error": graph_result.get("error"),
         "reference_date": graph_result.get("reference_date"),
         "reference_date_source": graph_result.get("reference_date_source"),
@@ -373,7 +400,7 @@ def align_place_with_reservation_target(
     current_url = ""
     if current_place and current_place.selected:
         current_url = current_place.selected.source_url or ""
-    if not force and _same_url(current_url, reservation_target):
+    if _same_url(current_url, reservation_target):
         return graph_result
 
     target_place = place_from_reservation_target(
@@ -464,6 +491,7 @@ def apply_email_location_override(
     place_provider: str,
     place_search_html: str,
     reservation_target: str,
+    reservation_target_auto: bool,
     runner_command: str,
     timezone: str,
 ) -> dict:
@@ -490,7 +518,8 @@ def apply_email_location_override(
         provider=provider,
         query_override=graph_result.get("place_search_query"),
     )
-    executor = executor_from_name("showui", target=reservation_target, runner_command=runner_command)
+    target_for_reservation = _auto_target_from_place(place_recommendation, reservation_target) if reservation_target_auto else reservation_target
+    executor = executor_from_name("showui", target=target_for_reservation, runner_command=runner_command)
     reservation = reserve_selected_place(
         extraction,
         graph_result["recommendation"],
@@ -508,33 +537,109 @@ def apply_email_location_override(
     updated = dict(graph_result)
     updated["extraction"] = extraction
     updated["place_recommendation"] = place_recommendation
+    updated["reservation_target"] = target_for_reservation
     updated["reservation_result"] = reservation
     updated["reply_draft"] = reply
     return updated
 
 
+def refresh_reservation_if_ready(
+    graph_result: dict,
+    reservation_target: str,
+    reservation_target_auto: bool,
+    runner_command: str,
+    timezone: str,
+) -> dict:
+    extraction = graph_result.get("extraction")
+    recommendation = graph_result.get("recommendation")
+    place_recommendation = graph_result.get("place_recommendation")
+    reservation = graph_result.get("reservation_result")
+    current_status = reservation.status if reservation else None
+
+    if current_status not in {None, "skipped"}:
+        return graph_result
+    if not extraction or not recommendation or not recommendation.selected:
+        return graph_result
+    if not place_recommendation or not place_recommendation.selected:
+        return graph_result
+
+    target_for_reservation = _auto_target_from_place(place_recommendation, reservation_target) if reservation_target_auto else reservation_target
+    executor = executor_from_name("showui", target=target_for_reservation, runner_command=runner_command)
+    refreshed_reservation = reserve_selected_place(
+        extraction,
+        recommendation,
+        place_recommendation,
+        executor=executor,
+    )
+    reply = generate_reply_draft(
+        extraction,
+        recommendation,
+        place_recommendation=place_recommendation,
+        reservation_result=refreshed_reservation,
+        timezone=timezone,
+    )
+    updated = dict(graph_result)
+    updated["reservation_target"] = target_for_reservation
+    updated["reservation_result"] = refreshed_reservation
+    updated["reply_draft"] = reply
+    return updated
+
+
+def _auto_target_from_place(place_recommendation: PlaceRecommendation | None, fallback: str) -> str:
+    selected = place_recommendation.selected if place_recommendation else None
+    selected_url = (selected.source_url or "").strip() if selected else ""
+    return selected_url or fallback
+
+
 def infer_naver_url(email_text: str) -> str:
-    lowered = email_text.lower()
-    if "강남" in lowered or "gangnam" in lowered:
-        return "https://map.naver.com/p/search/%EA%B0%95%EB%82%A8%20%EC%B9%B4%ED%8E%98"
-    if "홍대" in lowered or "hongdae" in lowered:
-        return "https://map.naver.com/p/search/%ED%99%8D%EB%8C%80%20%EC%B9%B4%ED%8E%98"
-    if "판교" in lowered or "pangyo" in lowered:
-        return "https://map.naver.com/p/search/%ED%8C%90%EA%B5%90%20%EC%B9%B4%ED%8E%98"
-    return DEFAULT_NAVER_BOOKING_URL
+    query = infer_place_query_from_text(email_text)
+    if not query:
+        return DEFAULT_NAVER_BOOKING_URL
+    return "https://map.naver.com/p/search/" + quote(query)
 
 
 def infer_location_query(email_text: str) -> str:
+    return infer_place_query_from_text(email_text)
+
+
+def infer_place_query_from_text(email_text: str) -> str:
     lowered = email_text.lower()
-    if "강남" in lowered or "gangnam" in lowered:
-        return "강남역 근처 카페"
+    area = _area_from_text(lowered)
+    venue = _venue_from_text(lowered)
+    if not area and not venue:
+        return ""
+    if not area:
+        area = "주변"
+    return f"{area} {venue} 예약".strip()
+
+
+def _area_from_text(lowered: str) -> str:
+    if "강남역" in lowered or "gangnam" in lowered:
+        return "강남역"
+    if "강남" in lowered:
+        return "강남"
     if "홍대" in lowered or "hongdae" in lowered:
-        return "홍대 근처 카페"
+        return "홍대"
     if "판교" in lowered or "pangyo" in lowered:
-        return "판교 근처 카페"
+        return "판교"
     if "숭실" in lowered or "soongsil" in lowered:
-        return "숭실대 근처 카페"
+        return "숭실대"
+    for area in ["서울대", "신촌", "잠실", "사당"]:
+        if area in lowered:
+            return area
     return ""
+
+
+def _venue_from_text(lowered: str) -> str:
+    if any(token in lowered for token in ["식당", "음식점", "레스토랑", "점심", "저녁", "식사", "밥", "회식", "restaurant", "lunch", "dinner"]):
+        return "식당"
+    if any(token in lowered for token in ["스터디룸", "스터디", "팀플", "과제", "공부", "study room"]):
+        return "스터디룸"
+    if any(token in lowered for token in ["회의실", "세미나실", "상담실", "면담", "상담", "인터뷰", "면접", "발표", "세미나"]):
+        return "회의실"
+    if any(token in lowered for token in ["카페", "커피", "coffee"]):
+        return "카페"
+    return "장소"
 
 
 def build_pipeline_steps(graph_result: dict, payload: dict, reservation_target: str) -> list[dict]:
@@ -630,16 +735,53 @@ def answer_chat(payload: dict) -> dict:
     question = (payload.get("question") or "").strip()
     context = payload.get("context") or {}
     llm_provider = payload.get("llm_provider")
+    llm_model = payload.get("llm_model")
     if not question:
-        return {"answer": "질문을 입력해주세요.", "source": "fallback"}
+        return {"answer": "질문을 입력해주세요.", "source": "context"}
 
     fallback = _fallback_chat_answer(question, context)
+    if _is_context_answer_question(question):
+        return {"answer": fallback, "source": "context"}
+
     try:
-        extractor = create_constraint_extractor(llm_provider)
+        extractor = create_constraint_extractor(llm_provider, model=llm_model)
         answer = extractor.generate_text(_build_chat_prompt(question, context))
         return {"answer": answer, "source": getattr(extractor, "provider_name", "llm")}
     except Exception as exc:
         return {"answer": fallback, "source": "context_fallback", "llm_error": f"{type(exc).__name__}: {exc}"}
+
+
+def _is_context_answer_question(question: str) -> bool:
+    lowered = question.lower()
+    return any(
+        token in lowered
+        for token in [
+            "예약",
+            "reservation",
+            "booking",
+            "실패",
+            "failed",
+            "성공",
+            "success",
+            "상태",
+            "status",
+            "장소",
+            "place",
+            "시간",
+            "time",
+            "날짜",
+            "date",
+            "메일",
+            "mail",
+            "email",
+            "context",
+            "컨텍스트",
+            "누구",
+            "참석",
+            "선택",
+            "추천",
+        ]
+    )
 
 
 def _fallback_chat_answer(question: str, context: dict) -> str:
@@ -656,12 +798,35 @@ def _fallback_chat_answer(question: str, context: dict) -> str:
         place = ((item.get("place_recommendation") or {}).get("selected") or {}).get("name")
         reservation = item.get("reservation_result") or {}
         title = item.get("appointment_title") or f"약속 {index}"
-        if "메일" in question or "context" in lowered:
+        if "메일" in question or "mail" in lowered or "email" in lowered or "context" in lowered or "컨텍스트" in lowered:
             summary = extraction.get("source_summary") or "선택된 메일 context가 있습니다."
             lines.append(f"{title}: {summary}")
-        elif "예약" in question:
-            lines.append(f"{title}: 예약 상태는 {reservation.get('status') or 'unknown'}입니다. {reservation.get('message') or ''}".strip())
-        elif "장소" in question:
+        elif (
+            "예약" in question
+            or "reservation" in lowered
+            or "booking" in lowered
+            or "실패" in question
+            or "failed" in lowered
+            or "성공" in question
+            or "success" in lowered
+            or "상태" in question
+            or "status" in lowered
+        ):
+            status = reservation.get("status") or "unknown"
+            message = reservation.get("message") or ""
+            reason = reservation.get("failure_reason") or ""
+            if status == "confirmed":
+                lines.append(f"{title}: 예약 시도는 성공으로 판정됐습니다. {message}".strip())
+            elif status == "failed":
+                detail = f" 실패 이유: {reason}." if reason else ""
+                lines.append(f"{title}: 예약 시도는 실패했습니다.{detail} {message}".strip())
+            elif status == "needs_manual_action":
+                lines.append(f"{title}: 예약 페이지에서 로그인, 본인확인, 최종확인 같은 수동 단계가 필요합니다. {message}".strip())
+            elif status == "skipped":
+                lines.append(f"{title}: 예약을 실행하지 못했습니다. 시간 또는 장소 정보가 부족합니다. {message}".strip())
+            else:
+                lines.append(f"{title}: 아직 예약 결과가 없습니다.")
+        elif "장소" in question or "place" in lowered:
             lines.append(f"{title}: 장소 후보는 {place or extraction.get('location_preference') or '아직 없습니다'}.")
         else:
             start = selected.get("start") or "선택된 시간이 없습니다"
@@ -676,6 +841,7 @@ def _build_chat_prompt(question: str, context: dict) -> str:
     return f"""You are a concise Korean chatbot for an e-mail scheduling agent demo.
 
 Answer only from the provided context. If the context is insufficient, say what is missing.
+Never claim a reservation succeeded when reservation_status is failed, skipped, needs_manual_action, or missing.
 Keep the answer short and practical.
 
 Context:
@@ -784,7 +950,8 @@ def main() -> None:
     parser.add_argument("--sample", default="data/samples/email_001.txt")
     parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
-    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--llm-provider", default=None)
+    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao", "demo"], default="demo")
     parser.add_argument("--place-search-html", default="data/place_search/soongsil_cafes.html")

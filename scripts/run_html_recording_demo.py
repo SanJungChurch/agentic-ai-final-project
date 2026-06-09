@@ -17,7 +17,8 @@ def main() -> None:
     parser.add_argument("--sample", default="data/samples/email_001.txt")
     parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
-    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--llm-provider", default=None)
+    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
     parser.add_argument("--selected-date", default=None)
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default="html")
@@ -45,6 +46,7 @@ def main() -> None:
             "reference_date": args.reference_date,
             "timezone": args.timezone,
             "llm_provider": args.llm_provider,
+            "llm_model": args.llm_model,
             "selected_date": args.selected_date,
             "calendar_path": str(PROJECT_ROOT / args.calendar),
             "place_provider": args.place_provider,
@@ -57,6 +59,7 @@ def main() -> None:
 
     output = {
         "provider": result.get("provider"),
+        "llm_model": result.get("llm_model"),
         "error": result.get("error"),
         "reference_date": result.get("reference_date"),
         "reference_date_source": result.get("reference_date_source"),

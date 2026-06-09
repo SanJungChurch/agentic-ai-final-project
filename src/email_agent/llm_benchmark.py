@@ -35,6 +35,7 @@ def run_llm_benchmark(
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
     llm_provider: str | None = None,
+    llm_model: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = _read_jsonl(benchmark_path)[offset : offset + limit]
@@ -47,6 +48,7 @@ def run_llm_benchmark(
         timezone=timezone,
         extractor=extractor,
         llm_provider=llm_provider,
+        llm_model=llm_model,
         sleep_seconds=sleep_seconds,
     )
 
@@ -61,6 +63,7 @@ def run_mailex_llm_benchmark(
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
     llm_provider: str | None = None,
+    llm_model: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = load_mailex_rows(mailex_root, split=split, limit=offset + limit)[offset : offset + limit]
@@ -73,6 +76,7 @@ def run_mailex_llm_benchmark(
         timezone=timezone,
         extractor=extractor,
         llm_provider=llm_provider,
+        llm_model=llm_model,
         sleep_seconds=sleep_seconds,
     )
 
@@ -87,6 +91,7 @@ def run_kvret_llm_benchmark(
     timezone: str = "Asia/Seoul",
     extractor: ConstraintExtractor | None = None,
     llm_provider: str | None = None,
+    llm_model: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
     rows = load_kvret_rows(kvret_root, split=split, limit=offset + limit)[offset : offset + limit]
@@ -99,6 +104,7 @@ def run_kvret_llm_benchmark(
         timezone=timezone,
         extractor=extractor,
         llm_provider=llm_provider,
+        llm_model=llm_model,
         sleep_seconds=sleep_seconds,
     )
 
@@ -113,9 +119,10 @@ def run_llm_benchmark_rows(
     timezone: str,
     extractor: ConstraintExtractor | None = None,
     llm_provider: str | None = None,
+    llm_model: str | None = None,
     sleep_seconds: float = 0.0,
 ) -> dict[str, Any]:
-    llm = extractor or create_constraint_extractor(llm_provider)
+    llm = extractor or create_constraint_extractor(llm_provider, model=llm_model)
     cases = []
 
     for idx, row in enumerate(rows):
@@ -134,6 +141,7 @@ def run_llm_benchmark_rows(
     return {
         "benchmark": benchmark_name,
         "provider": getattr(llm, "provider_name", llm_provider or "unknown"),
+        "llm_model": llm_model,
         "limit": limit,
         "offset": offset,
         "reference_date": reference_date,
@@ -165,7 +173,8 @@ def main() -> None:
     parser.add_argument("--offset", type=int, default=0, help="Number of leading cases to skip.")
     parser.add_argument("--reference-date", default=None, help="Reference date for relative time normalization.")
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for time normalization.")
-    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--llm-provider", default=None)
+    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
     parser.add_argument("--sleep", type=float, default=0.0, help="Seconds to sleep between API calls.")
     parser.add_argument("--output", default=None, help="Optional path to write the full JSON report.")
     args = parser.parse_args()
@@ -179,6 +188,7 @@ def main() -> None:
             reference_date=args.reference_date,
             timezone=args.timezone,
             llm_provider=args.llm_provider,
+            llm_model=args.llm_model,
             sleep_seconds=args.sleep,
         )
     elif args.mailex_root:
@@ -190,6 +200,7 @@ def main() -> None:
             reference_date=args.reference_date,
             timezone=args.timezone,
             llm_provider=args.llm_provider,
+            llm_model=args.llm_model,
             sleep_seconds=args.sleep,
         )
     else:
@@ -200,6 +211,7 @@ def main() -> None:
             reference_date=args.reference_date,
             timezone=args.timezone,
             llm_provider=args.llm_provider,
+            llm_model=args.llm_model,
             sleep_seconds=args.sleep,
         )
 

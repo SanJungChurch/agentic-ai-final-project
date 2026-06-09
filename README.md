@@ -112,6 +112,7 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
 
 # 로컬 Qwen3:4b를 Ollama로 사용할 때
+LLM_PROVIDER=qwen
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:4b
 ```
@@ -136,7 +137,7 @@ Qwen3:4b를 선택하려면 Ollama를 실행하고 모델을 받은 뒤 provider
 
 ```bat
 ollama pull qwen3:4b
-python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto --llm-provider qwen
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto --llm-provider qwen --llm-model qwen3:4b
 ```
 
 LLM 호출이 실패하면 자동으로 rule-based fallback이 실행됩니다.

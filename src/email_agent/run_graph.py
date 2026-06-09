@@ -16,7 +16,8 @@ def main() -> None:
         help="Reference date for relative time expressions. Use auto or omit it to infer from the e-mail.",
     )
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for normalization.")
-    parser.add_argument("--llm-provider", choices=["gemini", "ollama", "qwen"], default=None)
+    parser.add_argument("--llm-provider", default=None, help="LLM provider: gemini, ollama, qwen, or an alias such as qwen4bmodel.")
+    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
     parser.add_argument("--selected-date", default=None, help="Preferred meeting date in YYYY-MM-DD format.")
     parser.add_argument("--calendar", default=None, help="Optional path to a synthetic calendar JSON file.")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default=None)
@@ -34,6 +35,7 @@ def main() -> None:
             "reference_date": args.reference_date,
             "timezone": args.timezone,
             "llm_provider": args.llm_provider,
+            "llm_model": args.llm_model,
             "selected_date": args.selected_date,
             "calendar_path": args.calendar,
             "place_provider": args.place_provider,
@@ -48,6 +50,7 @@ def main() -> None:
     extraction = result["extraction"].model_dump()
     output = {
         "provider": result.get("provider"),
+        "llm_model": result.get("llm_model"),
         "error": result.get("error"),
         "reference_date": result.get("reference_date"),
         "reference_date_source": result.get("reference_date_source"),

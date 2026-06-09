@@ -161,6 +161,8 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].name, "카페 테스트")
         self.assertEqual(candidates[0].category, "카페")
+        self.assertTrue(candidates[0].source_url.startswith("https://map.naver.com/p/search/"))
+        self.assertIn("%EC%B9%B4%ED%8E%98%20%ED%85%8C%EC%8A%A4%ED%8A%B8", candidates[0].source_url)
 
 
 if __name__ == "__main__":

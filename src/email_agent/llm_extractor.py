@@ -154,14 +154,48 @@ class OllamaConstraintExtractor:
 def create_constraint_extractor(
     provider: str | None = None,
     settings: Settings | None = None,
+    *,
+    model: str | None = None,
 ) -> ConstraintExtractor:
     resolved_settings = settings or load_settings()
-    selected = (provider or resolved_settings.llm_provider or "gemini").lower()
+    selected = (provider or resolved_settings.llm_provider or "gemini").strip().lower()
     if selected in {"gemini", "google"}:
         return GeminiConstraintExtractor(resolved_settings)
-    if selected in {"ollama", "qwen", "qwen3", "qwen3:4b"}:
-        return OllamaConstraintExtractor(resolved_settings)
+    ollama_model = _resolve_ollama_model(selected, resolved_settings, model=model)
+    if ollama_model:
+        return OllamaConstraintExtractor(resolved_settings, model=ollama_model)
     raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def _resolve_ollama_model(
+    selected_provider: str,
+    settings: Settings,
+    *,
+    model: str | None = None,
+) -> str | None:
+    explicit_model = _clean_model_name(model)
+    if ":" in selected_provider and selected_provider.startswith(("qwen", "llama", "mistral", "gemma")):
+        return explicit_model or selected_provider
+    if selected_provider in {"ollama", "qwen", "qwen3", "qwen4b", "qwen4bmodel", "qwen3-4b", "qwen3_4b"}:
+        return explicit_model or settings.ollama_model
+
+    for prefix in ["ollama:", "qwen:"]:
+        if selected_provider.startswith(prefix):
+            embedded_model = _clean_model_name(selected_provider.removeprefix(prefix))
+            return explicit_model or embedded_model or settings.ollama_model
+
+    if selected_provider.startswith("qwen") and "4b" in selected_provider:
+        return explicit_model or settings.ollama_model
+    return None
+
+
+def _clean_model_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if cleaned.lower() in {"", "auto", "none", "null"}:
+        return None
+    return cleaned
 
 
 def _reference_date_from_response(raw_text: str | None, thread: EmailThread) -> str | None:
