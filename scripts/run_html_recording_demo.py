@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
     parser.add_argument("--llm-provider", default=None)
-    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
+    parser.add_argument("--llm-model", default=None, help="Optional model id, for example LGAI-EXAONE/EXAONE-4.0-1.2B.")
     parser.add_argument("--selected-date", default=None)
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default="html")

@@ -44,17 +44,17 @@ REFERENCE_DATE = "2026-05-27"
 # Timezone passed to the LLM prompt.
 TIMEZONE = "Asia/Seoul"
 
-# Choose one of: "gemini", "ollama", "qwen", "qwen4bmodel".
-LLM_PROVIDER = "qwen"
+# Choose one of: "exaone", "gemini", "ollama", "qwen", "qwen4bmodel".
+LLM_PROVIDER = "exaone"
 
-# Ollama model tag. Use None to read OLLAMA_MODEL/QWEN_MODEL from .env.
-LLM_MODEL = "qwen3:4b"
+# Local Transformers model id. Use None to read EXAONE_MODEL from .env.
+LLM_MODEL = "LGAI-EXAONE/EXAONE-4.0-1.2B"
 
 # Increase this if you hit API rate limits.
 SLEEP_SECONDS = 0.0
 
 # Report output path. The reports/ folder is gitignored.
-OUTPUT_PATH = Path("reports/qwen_kvret_test_100_eval.json")
+OUTPUT_PATH = Path("reports/exaone_kvret_test_100_eval.json")
 
 
 def main() -> None:

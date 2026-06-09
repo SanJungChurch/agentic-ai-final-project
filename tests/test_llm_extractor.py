@@ -1,7 +1,12 @@
 import unittest
 
 from src.email_agent.config import Settings
-from src.email_agent.llm_extractor import OllamaConstraintExtractor, _reference_date_from_response, create_constraint_extractor
+from src.email_agent.llm_extractor import (
+    ExaoneConstraintExtractor,
+    OllamaConstraintExtractor,
+    _reference_date_from_response,
+    create_constraint_extractor,
+)
 from src.email_agent.schema import EmailThread
 
 
@@ -26,7 +31,8 @@ class LlmExtractorTest(unittest.TestCase):
 
         self.assertIsInstance(extractor, OllamaConstraintExtractor)
         self.assertEqual(extractor.model, "qwen3:4b")
-        self.assertEqual(extractor.provider_name, "ollama:qwen3:4b")
+        self.assertEqual(extractor.provider_name, "ollama")
+        self.assertEqual(extractor.model_name, "qwen3:4b")
 
     def test_explicit_llm_model_overrides_env_model(self) -> None:
         settings = Settings(llm_provider="gemini", ollama_model="qwen3:4b")
@@ -35,6 +41,7 @@ class LlmExtractorTest(unittest.TestCase):
 
         self.assertIsInstance(extractor, OllamaConstraintExtractor)
         self.assertEqual(extractor.model, "qwen2.5:7b")
+        self.assertEqual(extractor.model_name, "qwen2.5:7b")
 
     def test_provider_can_be_ollama_model_tag(self) -> None:
         settings = Settings(llm_provider="gemini", ollama_model="qwen3:4b")
@@ -43,6 +50,28 @@ class LlmExtractorTest(unittest.TestCase):
 
         self.assertIsInstance(extractor, OllamaConstraintExtractor)
         self.assertEqual(extractor.model, "qwen2.5:7b")
+
+    def test_exaone_provider_resolves_to_huggingface_model(self) -> None:
+        settings = Settings(llm_provider="exaone", exaone_model="LGAI-EXAONE/EXAONE-4.0-1.2B")
+
+        extractor = create_constraint_extractor("exaone", settings=settings)
+
+        self.assertIsInstance(extractor, ExaoneConstraintExtractor)
+        self.assertEqual(extractor.provider_name, "exaone")
+        self.assertEqual(extractor.model_name, "LGAI-EXAONE/EXAONE-4.0-1.2B")
+
+    def test_gemini_provider_ignores_ollama_model_override_for_reporting(self) -> None:
+        settings = Settings(
+            llm_provider="gemini",
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-flash",
+            ollama_model="qwen3:4b",
+        )
+
+        extractor = create_constraint_extractor("gemini", settings=settings, model="qwen3:4b")
+
+        self.assertEqual(extractor.provider_name, "gemini")
+        self.assertEqual(extractor.model_name, "gemini-2.5-flash")
 
 
 if __name__ == "__main__":

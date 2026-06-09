@@ -108,8 +108,13 @@ def infer_reference_date_node(state: ExtractionGraphState) -> ExtractionGraphSta
             timezone=state.get("timezone", "Asia/Seoul"),
         )
         if inferred:
-            return {**state, "reference_date": inferred, "reference_date_source": f"{extractor.provider_name}_inferred"}
-        return {**state, "reference_date": None, "reference_date_source": "not_found"}
+            return {
+                **state,
+                "reference_date": inferred,
+                "reference_date_source": f"{extractor.provider_name}_inferred",
+                "llm_model": extractor.model_name,
+            }
+        return {**state, "reference_date": None, "reference_date_source": "not_found", "llm_model": extractor.model_name}
     except Exception as exc:
         return {**state, "reference_date": None, "reference_date_source": "failed", "reference_date_error": str(exc)}
 
@@ -123,9 +128,9 @@ def llm_extract_node(state: ExtractionGraphState) -> ExtractionGraphState:
             reference_date=state.get("reference_date"),
             timezone=state.get("timezone", "Asia/Seoul"),
         )
-        return {**state, "extraction": result, "provider": extractor.provider_name}
+        return {**state, "extraction": result, "provider": extractor.provider_name, "llm_model": extractor.model_name}
     except Exception as exc:
-        failed_provider = (provider or "gemini").lower()
+        failed_provider = (provider or "exaone").lower()
         return {**state, "error": str(exc), "provider": f"{failed_provider}_failed"}
 
 

@@ -16,8 +16,8 @@ def main() -> None:
         help="Reference date for relative time expressions. Use auto or omit it to infer from the e-mail.",
     )
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for normalization.")
-    parser.add_argument("--llm-provider", default=None, help="LLM provider: gemini, ollama, qwen, or an alias such as qwen4bmodel.")
-    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
+    parser.add_argument("--llm-provider", default=None, help="LLM provider: exaone, gemini, ollama, qwen, or a model alias.")
+    parser.add_argument("--llm-model", default=None, help="Optional model id, for example LGAI-EXAONE/EXAONE-4.0-1.2B.")
     parser.add_argument("--selected-date", default=None, help="Preferred meeting date in YYYY-MM-DD format.")
     parser.add_argument("--calendar", default=None, help="Optional path to a synthetic calendar JSON file.")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao"], default=None)

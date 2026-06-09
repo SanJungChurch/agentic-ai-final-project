@@ -141,7 +141,7 @@ def run_llm_benchmark_rows(
     return {
         "benchmark": benchmark_name,
         "provider": getattr(llm, "provider_name", llm_provider or "unknown"),
-        "llm_model": llm_model,
+        "llm_model": getattr(llm, "model_name", llm_model),
         "limit": limit,
         "offset": offset,
         "reference_date": reference_date,
@@ -174,7 +174,7 @@ def main() -> None:
     parser.add_argument("--reference-date", default=None, help="Reference date for relative time normalization.")
     parser.add_argument("--timezone", default="Asia/Seoul", help="Timezone for time normalization.")
     parser.add_argument("--llm-provider", default=None)
-    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
+    parser.add_argument("--llm-model", default=None, help="Optional model id, for example LGAI-EXAONE/EXAONE-4.0-1.2B.")
     parser.add_argument("--sleep", type=float, default=0.0, help="Seconds to sleep between API calls.")
     parser.add_argument("--output", default=None, help="Optional path to write the full JSON report.")
     args = parser.parse_args()

@@ -414,13 +414,14 @@
           <label for="llmProvider">
             LLM provider
             <select id="llmProvider">
+              <option value="exaone">EXAONE local Transformers</option>
               <option value="gemini">Gemini API</option>
               <option value="qwen">Qwen3:4b local Ollama</option>
             </select>
           </label>
           <label for="llmModel">
-            Ollama model
-            <input id="llmModel" value="qwen3:4b" />
+            LLM model override
+            <input id="llmModel" value="LGAI-EXAONE/EXAONE-4.0-1.2B" />
           </label>
         </div>
 
@@ -1005,6 +1006,18 @@
         }
       }
 
+      function syncModelForProvider() {
+        const provider = document.querySelector("#llmProvider").value;
+        const modelInput = document.querySelector("#llmModel");
+        if (provider === "exaone") {
+          modelInput.value = "LGAI-EXAONE/EXAONE-4.0-1.2B";
+        } else if (provider === "qwen") {
+          modelInput.value = "qwen3:4b";
+        } else if (provider === "gemini") {
+          modelInput.value = "gemini-2.5-flash";
+        }
+      }
+
       resetButton.addEventListener("click", () => window.location.reload());
       runButton.addEventListener("click", runAgent);
       runBatchButton.addEventListener("click", runBatch);
@@ -1017,6 +1030,7 @@
       document.querySelector("#mailList").addEventListener("change", syncSelectedMailToText);
       document.querySelector("#selectedDate").addEventListener("change", handleSelectedDateChange);
       document.querySelector("#referenceDate").addEventListener("change", handleReferenceDateChange);
+      document.querySelector("#llmProvider").addEventListener("change", syncModelForProvider);
       executor.addEventListener("change", syncLinks);
       emailText.addEventListener("input", syncLinks);
       naverUrlInput.addEventListener("input", syncLinks);

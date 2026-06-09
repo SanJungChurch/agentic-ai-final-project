@@ -746,7 +746,11 @@ def answer_chat(payload: dict) -> dict:
     try:
         extractor = create_constraint_extractor(llm_provider, model=llm_model)
         answer = extractor.generate_text(_build_chat_prompt(question, context))
-        return {"answer": answer, "source": getattr(extractor, "provider_name", "llm")}
+        return {
+            "answer": answer,
+            "source": getattr(extractor, "provider_name", "llm"),
+            "llm_model": getattr(extractor, "model_name", llm_model),
+        }
     except Exception as exc:
         return {"answer": fallback, "source": "context_fallback", "llm_error": f"{type(exc).__name__}: {exc}"}
 
@@ -951,7 +955,7 @@ def main() -> None:
     parser.add_argument("--reference-date", default="auto")
     parser.add_argument("--timezone", default="Asia/Seoul")
     parser.add_argument("--llm-provider", default=None)
-    parser.add_argument("--llm-model", default=None, help="Optional Ollama model tag, for example qwen3:4b.")
+    parser.add_argument("--llm-model", default=None, help="Optional model id, for example LGAI-EXAONE/EXAONE-4.0-1.2B.")
     parser.add_argument("--calendar", default="data/calendars/synthetic_calendar_001.json")
     parser.add_argument("--place-provider", choices=["mock", "html", "kakao", "demo"], default="demo")
     parser.add_argument("--place-search-html", default="data/place_search/soongsil_cafes.html")

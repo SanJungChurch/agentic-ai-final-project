@@ -2,7 +2,7 @@
 
 이 프로젝트는 이메일 대화에서 일정 조율 정보를 추출하고, 이후 캘린더 확인, 시간 추천, 장소 선택, GUI 예약, 답장 생성까지 확장하는 것을 목표로 하는 LangGraph 기반 Agentic AI 시스템입니다.
 
-현재 구현 범위는 1주차 MVP에 해당하는 **이메일 기반 일정 정보 추출 모듈**입니다. Gemini API 기반 LLM 추출기를 기본으로 설계하고, API 키가 없거나 LLM 호출에 실패할 경우 rule-based baseline으로 fallback되도록 구성했습니다.
+현재 구현 범위는 이메일 기반 일정 정보 추출에서 캘린더 확인, 장소 검색, GUI 예약 시도, 답장 생성까지 이어지는 MVP입니다. 기본 LLM은 로컬 Transformers 기반 `LGAI-EXAONE/EXAONE-4.0-1.2B`이며, Gemini API와 Ollama/Qwen도 선택적으로 사용할 수 있습니다. LLM 호출에 실패할 경우 rule-based baseline으로 fallback되도록 구성했습니다.
 
 ## 프로젝트 목표
 
@@ -34,7 +34,7 @@ Email Input
 ## 현재 구현된 기능
 
 - 이메일 thread 파싱
-- Gemini API 기반 일정 정보 추출 설계
+- EXAONE/Gemini/Ollama 선택형 LLM 기반 일정 정보 추출 설계
 - `.env` 기반 API 키 로드
 - LangGraph 기반 extraction workflow
 - Pydantic schema validation
@@ -107,12 +107,17 @@ notepad .env
 `.env` 예시:
 
 ```text
-LLM_PROVIDER=gemini
+LLM_PROVIDER=exaone
+EXAONE_MODEL=LGAI-EXAONE/EXAONE-4.0-1.2B
+EXAONE_DEVICE_MAP=auto
+EXAONE_TORCH_DTYPE=auto
+EXAONE_MAX_NEW_TOKENS=768
+
+# Gemini를 사용할 때만 필요합니다.
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
 
-# 로컬 Qwen3:4b를 Ollama로 사용할 때
-LLM_PROVIDER=qwen
+# 로컬 Qwen3:4b를 Ollama로 사용할 때만 사용합니다.
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:4b
 ```
@@ -133,11 +138,10 @@ LangGraph + LLM 기반 extraction workflow 실행:
 python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto
 ```
 
-Qwen3:4b를 선택하려면 Ollama를 실행하고 모델을 받은 뒤 provider를 지정합니다.
+EXAONE 4.0 1.2B를 명시적으로 선택하려면 provider와 model을 지정합니다.
 
 ```bat
-ollama pull qwen3:4b
-python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto --llm-provider qwen --llm-model qwen3:4b
+python -m src.email_agent.run_graph --sample data\samples\email_001.txt --reference-date auto --llm-provider exaone --llm-model LGAI-EXAONE/EXAONE-4.0-1.2B
 ```
 
 LLM 호출이 실패하면 자동으로 rule-based fallback이 실행됩니다.
@@ -206,7 +210,7 @@ Local GPU ShowUI-2B 실행을 위해서는 CUDA PyTorch를 먼저 설치합니�
 
 ```bat
 python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-pip install transformers accelerate qwen-vl-utils safetensors
+pip install "transformers>=4.54.0" accelerate qwen-vl-utils safetensors
 ```
 
 Local GPU ShowUI-2B end-to-end demo:
@@ -271,22 +275,22 @@ python -m src.email_agent.evaluate --sample data\samples\email_001.txt --gold da
 python -m src.email_agent.benchmark --benchmark data\benchmarks\week1_event_extraction.jsonl
 ```
 
-Gemini API로 작은 benchmark subset을 직접 평가:
+EXAONE으로 작은 benchmark subset을 직접 평가:
 
 ```bat
-python -m src.email_agent.llm_benchmark --benchmark data\benchmarks\week1_event_extraction.jsonl --limit 10 --reference-date 2026-05-26 --output reports\gemini_week1_eval.json
+python -m src.email_agent.llm_benchmark --benchmark data\benchmarks\week1_event_extraction.jsonl --limit 10 --reference-date 2026-05-26 --llm-provider exaone --llm-model LGAI-EXAONE/EXAONE-4.0-1.2B --output reports\exaone_week1_eval.json
 ```
 
-로컬 MailEx 원본 데이터셋을 직접 사용해 Gemini 평가:
+로컬 MailEx 원본 데이터셋을 직접 사용해 EXAONE 평가:
 
 ```bat
-python -m src.email_agent.llm_benchmark --mailex-root dataset\data --split test --limit 10 --reference-date 2026-05-26 --output reports\gemini_mailex_test_10_eval.json
+python -m src.email_agent.llm_benchmark --mailex-root dataset\data --split test --limit 10 --reference-date 2026-05-26 --llm-provider exaone --llm-model LGAI-EXAONE/EXAONE-4.0-1.2B --output reports\exaone_mailex_test_10_eval.json
 ```
 
-KVRET calendar scheduling subset을 직접 사용해 Gemini 평가:
+KVRET calendar scheduling subset을 직접 사용해 EXAONE 평가:
 
 ```bat
-python -m src.email_agent.llm_benchmark --kvret-root dataset\kvret --split test --limit 10 --reference-date 2026-05-27 --output reports\gemini_kvret_test_10_eval.json
+python -m src.email_agent.llm_benchmark --kvret-root dataset\kvret --split test --limit 10 --reference-date 2026-05-27 --llm-provider exaone --llm-model LGAI-EXAONE/EXAONE-4.0-1.2B --output reports\exaone_kvret_test_10_eval.json
 ```
 
 KVRET만 반복 평가할 때는 아래 파일의 상단 설정값을 바꾼 뒤 실행합니다.

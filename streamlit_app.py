@@ -37,7 +37,19 @@ def main() -> None:
             index=0,
             help="DOM fallback is fast and stable for recording. Local GPU uses ShowUI-2B visual grounding.",
         )
-        use_gemini = st.toggle("Use Gemini extraction", value=True)
+        llm_provider = st.selectbox(
+            "LLM provider",
+            ["exaone", "gemini", "qwen", "ollama", "rule_fallback"],
+            index=0,
+        )
+        default_model = {
+            "exaone": "LGAI-EXAONE/EXAONE-4.0-1.2B",
+            "gemini": "gemini-2.5-flash",
+            "qwen": "qwen3:4b",
+            "ollama": "qwen3:4b",
+            "rule_fallback": "",
+        }[llm_provider]
+        llm_model = st.text_input("LLM model", value=default_model)
         run_button = st.button("Run Pipeline", type="primary", use_container_width=True)
 
         st.divider()
@@ -77,6 +89,8 @@ def main() -> None:
             "email_text": email_text,
             "reference_date": reference_date,
             "timezone": timezone,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
             "calendar_path": str(DEFAULT_CALENDAR),
             "place_provider": "html",
             "place_search_html": str(DEFAULT_PLACE_HTML),
@@ -86,23 +100,16 @@ def main() -> None:
         }
 
         with st.spinner("Running agent workflow..."):
-            result = run_graph(state, force_rule_fallback=not use_gemini)
+            result = run_graph(state)
         st.session_state["demo_result"] = result
         st.rerun()
 
 
-def run_graph(state: dict, *, force_rule_fallback: bool = False) -> dict:
-    if force_rule_fallback:
-        import os
-        from unittest.mock import patch
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
-            result = build_extraction_graph().invoke(state)
-    else:
-        result = build_extraction_graph().invoke(state)
-
+def run_graph(state: dict) -> dict:
+    result = build_extraction_graph().invoke(state)
     return {
         "provider": result.get("provider"),
+        "llm_model": result.get("llm_model"),
         "error": result.get("error"),
         "extraction": result["extraction"].model_dump() if result.get("extraction") else None,
         "recommendation": result["recommendation"].model_dump() if result.get("recommendation") else None,
@@ -124,12 +131,13 @@ def build_runner_command(showui_mode: str) -> str:
 
 def render_result(result: dict) -> None:
     provider = result.get("provider") or "-"
+    model = result.get("llm_model") or "-"
     error = result.get("error")
     reservation = result.get("reservation_result") or {}
     reply = result.get("reply_draft") or {}
 
     status_cols = st.columns(4)
-    status_cols[0].metric("Extractor", provider)
+    status_cols[0].metric("Extractor", provider, help=f"Model: {model}")
     status_cols[1].metric("Schedule", _nested_status(result, "recommendation"))
     status_cols[2].metric("Place", _nested_status(result, "place_recommendation"))
     status_cols[3].metric("Reservation", reservation.get("status", "-"))

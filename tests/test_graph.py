@@ -66,6 +66,7 @@ class GraphTest(unittest.TestCase):
             with patch("src.email_agent.graph.create_constraint_extractor") as factory_mock:
                 extractor_mock = factory_mock.return_value
                 extractor_mock.provider_name = "gemini"
+                extractor_mock.model_name = "gemini-2.5-flash"
                 extractor_mock.extract.return_value = ExtractionResult.model_validate_json(email_text)
                 result = graph.invoke(
                     {
@@ -77,6 +78,7 @@ class GraphTest(unittest.TestCase):
                 )
 
         self.assertEqual(result["provider"], "gemini")
+        self.assertEqual(result["llm_model"], "gemini-2.5-flash")
         self.assertEqual(result["recommendation"].status, "selected")
         self.assertEqual(
             result["recommendation"].selected.candidate.start,
@@ -94,6 +96,7 @@ class GraphTest(unittest.TestCase):
             with patch("src.email_agent.graph.create_constraint_extractor") as factory_mock:
                 extractor_mock = factory_mock.return_value
                 extractor_mock.provider_name = "ollama"
+                extractor_mock.model_name = "qwen3:4b"
                 extractor_mock.infer_reference_date.return_value = "2026-05-26"
                 extractor_mock.extract.return_value = ExtractionResult.model_validate_json(email_text)
                 result = graph.invoke(
@@ -109,6 +112,7 @@ class GraphTest(unittest.TestCase):
         factory_mock.assert_any_call("qwen", model="qwen3:4b")
         extractor_mock.extract.assert_called_once()
         self.assertEqual(result["provider"], "ollama")
+        self.assertEqual(result["llm_model"], "qwen3:4b")
         self.assertEqual(result["reference_date"], "2026-05-26")
         self.assertEqual(result["reference_date_source"], "ollama_inferred")
 
