@@ -56,3 +56,39 @@ E-mail subject:
 E-mail thread:
 {thread.body}
 """
+
+
+def build_place_search_prompt(
+    thread: EmailThread,
+    extraction_json: str,
+    recommendation_json: str | None = None,
+) -> str:
+    subject = thread.subject or "(no subject)"
+    recommendation_text = recommendation_json or "{}"
+    return f"""You are the place retrieval planner for an e-mail-to-action scheduling agent.
+
+Read the e-mail context and extracted scheduling facts. Decide whether the appointment needs a physical place search. If it does, create one concise Korean search query suitable for Kakao/Naver map search.
+
+Important rules:
+- Do not default to cafe.
+- Choose the venue type that fits the appointment: restaurant for meals, study room for study/team project work, meeting room or seminar room for business/interview/presentation, office/department room when explicitly stated, clinic/hospital for medical visits, cafe only for coffee chat or when the text asks for a cafe.
+- Include the location area when the text provides one, such as 숭실대, 강남역, 홍대, 판교.
+- If the appointment is clearly online/phone-only, set needs_place_search to false and search_query to null.
+- Do not invent a specific store name. Return a search query, not a final place.
+- Return JSON only.
+
+Return this schema:
+{{"needs_place_search": true, "search_query": "string or null", "venue_type": "string or null", "reason": "short Korean reason"}}
+
+E-mail subject:
+{subject}
+
+E-mail thread:
+{thread.body}
+
+Extraction JSON:
+{extraction_json}
+
+Schedule recommendation JSON:
+{recommendation_text}
+"""

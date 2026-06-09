@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, TypedDict
 
 from .extractor import extract_constraints, parse_email_thread
+from .json_utils import parse_json_object
 from .llm_extractor import create_constraint_extractor
 from .place_retriever import provider_from_name, recommend_place
+from .prompting import build_place_search_prompt
 from .reservation_executor import executor_from_name, reserve_selected_place
 from .reply_generator import generate_reply_draft
 from .schema import (
@@ -30,6 +33,9 @@ class ExtractionGraphState(TypedDict, total=False):
     calendar_path: str | None
     place_provider: str | None
     place_search_html: str | None
+    place_search_query: str | None
+    place_search_query_source: str | None
+    place_search_query_reason: str | None
     reservation_provider: str | None
     reservation_html: str | None
     reservation_target: str | None
@@ -151,16 +157,48 @@ def schedule_node(state: ExtractionGraphState) -> ExtractionGraphState:
         return state
 
     try:
+        adjusted_extraction = apply_selected_date_to_candidates(extraction, state.get("selected_date"))
         recommendation = recommend_time(
-            extraction,
+            adjusted_extraction,
             load_calendar(calendar_path),
             preferred_date=state.get("selected_date"),
         )
-        return {**state, "recommendation": recommendation}
+        return {**state, "extraction": adjusted_extraction, "recommendation": recommendation}
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; scheduling failed: {exc}" if previous_error else f"scheduling failed: {exc}"
         return {**state, "error": error}
+
+
+def apply_selected_date_to_candidates(
+    extraction: ExtractionResult,
+    selected_date: str | None,
+) -> ExtractionResult:
+    if not selected_date:
+        return extraction
+
+    updated_candidates = []
+    for item in extraction.candidate_times:
+        if not item.normalized_start or not item.normalized_end:
+            updated_candidates.append(item)
+            continue
+        start = datetime.fromisoformat(item.normalized_start)
+        end = datetime.fromisoformat(item.normalized_end)
+        duration = end - start
+        selected_start = datetime.fromisoformat(f"{selected_date}T{start.time().isoformat()}")
+        if start.tzinfo:
+            selected_start = selected_start.replace(tzinfo=start.tzinfo)
+        selected_end = selected_start + duration
+        updated_candidates.append(
+            item.model_copy(
+                update={
+                    "normalized_start": selected_start.isoformat(),
+                    "normalized_end": selected_end.isoformat(),
+                }
+            )
+        )
+
+    return extraction.model_copy(update={"candidate_times": updated_candidates})
 
 
 def retrieve_places_node(state: ExtractionGraphState) -> ExtractionGraphState:
@@ -171,16 +209,114 @@ def retrieve_places_node(state: ExtractionGraphState) -> ExtractionGraphState:
     try:
         provider_name = state.get("place_provider") or ("html" if state.get("place_search_html") else "mock")
         provider = provider_from_name(provider_name, html_path=state.get("place_search_html"))
+        place_query, query_source, query_reason = generate_place_search_query(state)
+        if place_query is None:
+            return {
+                **state,
+                "place_search_query": None,
+                "place_search_query_source": query_source,
+                "place_search_query_reason": query_reason,
+                "place_recommendation": PlaceRecommendation(
+                    query="",
+                    candidates=[],
+                    selected=None,
+                    status="no_query",
+                    summary=query_reason,
+                ),
+            }
         place_recommendation = recommend_place(
             extraction,
             state.get("recommendation"),
             provider=provider,
+            query_override=place_query,
         )
-        return {**state, "place_recommendation": place_recommendation}
+        return {
+            **state,
+            "place_search_query": place_query,
+            "place_search_query_source": query_source,
+            "place_search_query_reason": query_reason,
+            "place_recommendation": place_recommendation,
+        }
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; place retrieval failed: {exc}" if previous_error else f"place retrieval failed: {exc}"
         return {**state, "error": error}
+
+
+def generate_place_search_query(state: ExtractionGraphState) -> tuple[str | None, str, str]:
+    extraction = state.get("extraction")
+    if not extraction:
+        return None, "missing_extraction", "추출 결과가 없습니다."
+
+    recommendation = state.get("recommendation")
+    try:
+        extractor = create_constraint_extractor(state.get("llm_provider"))
+        prompt = build_place_search_prompt(
+            state["thread"],
+            extraction.model_dump_json(),
+            recommendation.model_dump_json() if recommendation else None,
+        )
+        data = parse_json_object(extractor.generate_text(prompt))
+        if data.get("needs_place_search") is False:
+            return None, getattr(extractor, "provider_name", "llm"), str(data.get("reason") or "물리적 장소 검색이 필요 없습니다.")
+        query = str(data.get("search_query") or "").strip()
+        if query:
+            return query, getattr(extractor, "provider_name", "llm"), str(data.get("reason") or "")
+    except Exception:
+        pass
+
+    fallback = infer_place_search_query(extraction)
+    if fallback:
+        return fallback, "heuristic_fallback", "LLM 장소 검색어 생성 실패 또는 빈 응답으로 heuristic query를 사용했습니다."
+    return None, "heuristic_fallback", "장소 검색이 필요하거나 가능한지 판단할 정보가 부족합니다."
+
+
+def infer_place_search_query(extraction: ExtractionResult) -> str:
+    preference = (extraction.location_preference or "").lower()
+    text = " ".join(
+        item
+        for item in [
+            extraction.location_preference or "",
+            extraction.source_summary or "",
+            " ".join(time.expression for time in extraction.candidate_times),
+        ]
+        if item
+    ).lower()
+    location = _location_area_from_text(text) or _clean_location_text(extraction.location_preference)
+
+    if any(token in text for token in ["zoom", "온라인", "화상", "전화", "콜", "통화", "google meet", "teams"]):
+        return ""
+    if any(token in preference for token in ["카페", "coffee", "커피"]):
+        return f"{location} 카페 예약".strip()
+    if any(token in preference for token in ["식당", "restaurant", "점심", "저녁", "식사"]):
+        return f"{location} 식당 예약".strip()
+    if "스터디룸" in preference:
+        return f"{location} 스터디룸 예약".strip()
+    if any(token in preference for token in ["회의실", "세미나실", "상담실"]):
+        return f"{location} 회의실 예약".strip()
+    if any(token in text for token in ["점심", "저녁", "식사", "밥", "회식", "lunch", "dinner", "restaurant"]):
+        return f"{location} 식당 예약".strip()
+    if any(token in text for token in ["팀플", "스터디", "과제", "공부", "study"]):
+        return f"{location} 스터디룸 예약".strip()
+    if any(token in text for token in ["면담", "상담", "인터뷰", "면접", "발표", "세미나", "회의", "미팅", "meeting"]):
+        return f"{location} 조용한 회의실 예약".strip()
+    if any(token in text for token in ["카페", "coffee", "커피"]):
+        return f"{location} 카페 예약".strip()
+    return _clean_location_text(extraction.location_preference)
+
+
+def _location_area_from_text(text: str) -> str:
+    for area in ["숭실대", "강남역", "강남", "홍대", "판교", "서울대", "신촌", "잠실", "사당"]:
+        if area.lower() in text:
+            return area
+    return ""
+
+
+def _clean_location_text(value: str | None) -> str:
+    if not value:
+        return ""
+    cleaned = value.strip().rstrip(".")
+    return cleaned.removeprefix("장소는").strip()
 
 
 def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:

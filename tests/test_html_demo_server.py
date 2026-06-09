@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.serve_html_demo import group_gmail_messages, split_appointment_contexts
+from scripts.serve_html_demo import group_gmail_messages, place_from_reservation_target, split_appointment_contexts
 
 
 class HtmlDemoServerTest(unittest.TestCase):
@@ -37,6 +37,18 @@ class HtmlDemoServerTest(unittest.TestCase):
         self.assertEqual(len(contexts), 2)
         self.assertEqual(contexts[0]["title"], "A")
         self.assertEqual(contexts[1]["title"], "B")
+
+    def test_place_from_reservation_target_uses_naver_url(self) -> None:
+        url = (
+            "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/"
+            "place/1649187599?placePath=/booking&searchText=%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98"
+        )
+
+        place = place_from_reservation_target(url, "숭실대 근처 카페")
+
+        self.assertEqual(place.source_url, url)
+        self.assertIn("숭실대 카페", place.name)
+        self.assertEqual(place.category, "naver_booking")
 
 
 if __name__ == "__main__":

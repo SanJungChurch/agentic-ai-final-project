@@ -30,7 +30,7 @@ def main() -> None:
         help="Use Playwright selectors instead of ShowUI grounding. Useful for the local mock page.",
     )
     parser.add_argument("--headless", action="store_true", help="Run browser headless.")
-    parser.add_argument("--timeout-ms", type=int, default=30000)
+    parser.add_argument("--timeout-ms", type=int, default=10000)
     args = parser.parse_args()
 
     payload = json.load(sys.stdin)

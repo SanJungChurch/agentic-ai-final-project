@@ -669,7 +669,7 @@
             statusBox.textContent = data.message || "최근 3일 내 일정 관련 Gmail을 찾지 못했습니다.";
             return;
           }
-          gmailGroups = data.groups || [];
+          gmailGroups = (data.groups && data.groups.length) ? data.groups : groupMessagesClient(data.messages || []);
           renderMailGroups(gmailGroups);
           syncSelectedMailToText();
           const subjects = (data.messages || [])
@@ -681,6 +681,45 @@
         } finally {
           gmailButton.disabled = false;
         }
+      }
+
+      function groupMessagesClient(messages) {
+        const groups = new Map();
+        for (const message of messages) {
+          const key = message.thread_id ? `thread:${message.thread_id}` : `subject:${cleanSubject(message.subject || "(no subject)").toLowerCase()}`;
+          if (!groups.has(key)) {
+            groups.set(key, {
+              id: key,
+              title: cleanSubject(message.subject || "(no subject)"),
+              message_ids: [],
+              subjects: [],
+              dates: [],
+              email_texts: [],
+              schedule_score: 0,
+              count: 0,
+            });
+          }
+          const group = groups.get(key);
+          group.message_ids.push(message.message_id);
+          group.subjects.push(message.subject || "(no subject)");
+          group.dates.push(message.date || "");
+          group.email_texts.push(message.email_text || "");
+          group.schedule_score = Math.max(group.schedule_score, message.schedule_score || 0);
+          group.count += 1;
+        }
+        return [...groups.values()]
+          .map((group) => ({
+            ...group,
+            email_text: group.email_texts.filter(Boolean).join("\n\n--- same appointment thread ---\n\n"),
+          }))
+          .sort((a, b) => b.schedule_score - a.schedule_score || b.count - a.count);
+      }
+
+      function cleanSubject(subject) {
+        return String(subject || "(no subject)")
+          .replace(/^\s*(re|fw|fwd)\s*:\s*/i, "")
+          .replace(/^\s*(답장|전달)\s*:\s*/i, "")
+          .trim() || "(no subject)";
       }
 
       function renderMailGroups(groups) {
@@ -823,12 +862,15 @@
 
         setKv("schedule", [
           ["status", recommendation.status || ""],
+          ["preferred date", data.selected_date || ""],
           ["selected", candidate.start || ""],
           ["score", selected.score ?? ""],
           ["reasons", (selected.reasons || []).slice(0, 3).join(" / ")],
         ]);
 
         setKv("place", [
+          ["query", data.place_search_query || place.query || ""],
+          ["query source", data.place_search_query_source || ""],
           ["status", place.status || ""],
           ["selected", selectedPlace.name || ""],
           ["address", selectedPlace.address || ""],
@@ -891,6 +933,10 @@
             }),
           });
           const data = await response.json();
+          if (!response.ok || data.error === "not_found") {
+            appendChat("agent", "Chat endpoint를 찾지 못했습니다. 데모 서버가 이전 코드로 실행 중일 수 있으니 서버를 재시작한 뒤 새로고침해주세요.");
+            return;
+          }
           appendChat("agent", data.answer || data.error || "답변을 생성하지 못했습니다.");
         } catch (error) {
           appendChat("agent", `Chat API 호출 실패: ${error}`);
@@ -906,6 +952,13 @@
         node.scrollTop = node.scrollHeight;
       }
 
+      function handleSelectedDateChange() {
+        syncSelectedMailToText();
+        if (latestResult) {
+          statusBox.textContent = "Preferred meeting date가 변경되었습니다. Run agent 또는 Run selected contexts를 다시 실행해주세요.";
+        }
+      }
+
       resetButton.addEventListener("click", () => window.location.reload());
       runButton.addEventListener("click", runAgent);
       runBatchButton.addEventListener("click", runBatch);
@@ -916,6 +969,7 @@
         if (event.key === "Enter") askChatbot();
       });
       document.querySelector("#mailList").addEventListener("change", syncSelectedMailToText);
+      document.querySelector("#selectedDate").addEventListener("change", handleSelectedDateChange);
       executor.addEventListener("change", syncLinks);
       emailText.addEventListener("input", syncLinks);
       naverUrlInput.addEventListener("input", syncLinks);

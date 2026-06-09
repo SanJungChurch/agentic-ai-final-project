@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.email_agent.graph import build_extraction_graph
+from src.email_agent.graph import apply_selected_date_to_candidates, build_extraction_graph, infer_place_search_query
 
 
 class GraphTest(unittest.TestCase):
@@ -105,6 +105,41 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(result["provider"], "ollama")
         self.assertEqual(result["reference_date"], "2026-05-26")
         self.assertEqual(result["reference_date_source"], "ollama_inferred")
+
+    def test_selected_date_rewrites_candidate_dates(self) -> None:
+        from src.email_agent.schema import ExtractionResult
+
+        extraction = ExtractionResult.model_validate_json(
+            Path("data/samples/extraction_001.normalized.json").read_text(encoding="utf-8")
+        )
+
+        adjusted = apply_selected_date_to_candidates(extraction, "2026-06-10")
+
+        self.assertTrue(
+            all(item.normalized_start.startswith("2026-06-10") for item in adjusted.candidate_times)
+        )
+        self.assertEqual(adjusted.candidate_times[0].normalized_start[-6:], "+09:00")
+
+    def test_infer_place_search_query_matches_appointment_type(self) -> None:
+        from src.email_agent.schema import ExtractionResult
+
+        meal = ExtractionResult.model_validate(
+            {
+                "intent": "schedule_meeting",
+                "participants": ["A"],
+                "candidate_times": [],
+                "unavailable_times": [],
+                "location_preference": "강남역 근처",
+                "confidence": 0.8,
+                "source_summary": "점심 약속을 잡아야 합니다.",
+            }
+        )
+        advising = meal.model_copy(update={"location_preference": "숭실대 근처", "source_summary": "교수님 면담 일정을 잡아야 합니다."})
+        explicit_cafe = meal.model_copy(update={"location_preference": "숭실대 근처 카페", "source_summary": "팀플 회의입니다."})
+
+        self.assertEqual(infer_place_search_query(meal), "강남역 식당 예약")
+        self.assertEqual(infer_place_search_query(advising), "숭실대 조용한 회의실 예약")
+        self.assertEqual(infer_place_search_query(explicit_cafe), "숭실대 카페 예약")
 
 
 if __name__ == "__main__":

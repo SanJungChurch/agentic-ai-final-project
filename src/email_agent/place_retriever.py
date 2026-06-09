@@ -58,6 +58,48 @@ class DemoPlaceProvider:
 
     def search(self, query: str, *, location_hint: str | None = None) -> list[PlaceCandidate]:
         normalized = f"{query} {location_hint or ''}".lower()
+        area = _demo_area(normalized)
+        if any(token in normalized for token in ["식당", "restaurant", "점심", "저녁", "식사", "lunch", "dinner"]):
+            return [
+                PlaceCandidate(
+                    name=f"{area} 예약 식당",
+                    address=_demo_address(area),
+                    category="restaurant",
+                    rating=4.4,
+                    source_url=_naver_search_url(f"{area} 식당 예약"),
+                    availability_hint="네이버 예약 확인 필요",
+                ),
+                PlaceCandidate(
+                    name=f"{area} 조용한 한식당",
+                    address=_demo_address(area),
+                    category="restaurant",
+                    rating=4.1,
+                    source_url=_naver_search_url(f"{area} 한식당 예약"),
+                    availability_hint="예약 가능 여부 확인 필요",
+                ),
+            ]
+        if any(token in normalized for token in ["스터디룸", "study room", "팀플", "스터디", "과제"]):
+            return [
+                PlaceCandidate(
+                    name=f"{area} 스터디룸",
+                    address=_demo_address(area),
+                    category="study room",
+                    rating=4.5,
+                    source_url=_naver_search_url(f"{area} 스터디룸 예약"),
+                    availability_hint="네이버 예약 확인 필요",
+                )
+            ]
+        if any(token in normalized for token in ["회의실", "meeting room", "세미나", "발표", "인터뷰", "면접", "면담", "상담"]):
+            return [
+                PlaceCandidate(
+                    name=f"{area} 조용한 회의실",
+                    address=_demo_address(area),
+                    category="meeting room",
+                    rating=4.3,
+                    source_url=_naver_search_url(f"{area} 회의실 예약"),
+                    availability_hint="네이버 예약 확인 필요",
+                )
+            ]
         if "강남" in normalized or "gangnam" in normalized:
             return [
                 PlaceCandidate(
@@ -208,8 +250,9 @@ def recommend_place(
     recommendation: ScheduleRecommendation | None = None,
     *,
     provider: PlaceProvider | None = None,
+    query_override: str | None = None,
 ) -> PlaceRecommendation:
-    query = build_place_query(extraction)
+    query = (query_override or "").strip() or build_place_query(extraction)
     if not query:
         return PlaceRecommendation(query="", status="no_query", summary="장소 검색 조건이 없습니다.")
 
@@ -283,8 +326,42 @@ def _score_place(candidate: PlaceCandidate, query: str) -> PlaceCandidate:
         score += 1.0
     if "카페" in query and candidate.category == "cafe":
         score += 1.0
+    if any(token in query for token in ["식당", "점심", "저녁", "식사"]) and candidate.category == "restaurant":
+        score += 1.0
+    if "스터디룸" in query and candidate.category == "study room":
+        score += 1.0
+    if any(token in query for token in ["회의실", "면담", "인터뷰", "상담", "세미나"]) and candidate.category == "meeting room":
+        score += 1.0
 
     return candidate.model_copy(update={"score": round(score, 4)})
+
+
+def _demo_area(normalized: str) -> str:
+    if "강남" in normalized or "gangnam" in normalized:
+        return "강남역"
+    if "홍대" in normalized or "hongdae" in normalized:
+        return "홍대"
+    if "판교" in normalized or "pangyo" in normalized:
+        return "판교"
+    if "숭실" in normalized or "soongsil" in normalized:
+        return "숭실대"
+    return "주변"
+
+
+def _demo_address(area: str) -> str | None:
+    if area == "강남역":
+        return "서울 강남구 테헤란로 일대"
+    if area == "홍대":
+        return "서울 마포구 와우산로 일대"
+    if area == "판교":
+        return "경기 성남시 분당구 판교역로 일대"
+    if area == "숭실대":
+        return "서울 동작구 상도로 일대"
+    return None
+
+
+def _naver_search_url(query: str) -> str:
+    return "https://map.naver.com/p/search/" + urllib.parse.quote(query)
 
 
 def _is_reservation_candidate(candidate: PlaceCandidate) -> bool:

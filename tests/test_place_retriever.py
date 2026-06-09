@@ -42,6 +42,26 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertIsNotNone(recommendation.selected)
         self.assertEqual(recommendation.selected.name, "카페 온더힐")
 
+    def test_recommend_place_uses_query_override(self) -> None:
+        class FakeProvider:
+            def __init__(self):
+                self.query = None
+
+            def search(self, query, *, location_hint=None):
+                self.query = query
+                return [PlaceCandidate(name="강남 예약 식당", category="restaurant", availability_hint="예약 가능")]
+
+        extraction = ExtractionResult(
+            intent=Intent.SCHEDULE_MEETING,
+            location_preference="숭실대 근처 카페",
+        )
+        provider = FakeProvider()
+
+        recommendation = recommend_place(extraction, provider=provider, query_override="강남역 식당 예약")
+
+        self.assertEqual(provider.query, "강남역 식당 예약")
+        self.assertEqual(recommendation.selected.name, "강남 예약 식당")
+
     def test_recommend_place_filters_unavailable_candidates(self) -> None:
         class FakeProvider:
             def search(self, query, *, location_hint=None):
@@ -97,6 +117,17 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertNotEqual(gangnam[0].name, hongdae[0].name)
         self.assertEqual(gangnam[0].name, "강남 브루잉 라운지")
         self.assertEqual(hongdae[0].name, "홍대 루프 카페")
+
+    def test_demo_provider_supports_non_cafe_venue_types(self) -> None:
+        provider = DemoPlaceProvider()
+
+        restaurant = provider.search("강남역 식당 예약")
+        study_room = provider.search("숭실대 스터디룸 예약")
+        meeting_room = provider.search("판교 조용한 회의실 예약")
+
+        self.assertEqual(restaurant[0].category, "restaurant")
+        self.assertEqual(study_room[0].category, "study room")
+        self.assertEqual(meeting_room[0].category, "meeting room")
 
     def test_kakao_provider_parses_documents(self) -> None:
         payload = {

@@ -8,7 +8,7 @@ import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -186,7 +186,13 @@ def run_agent(server: DemoServer, payload: dict) -> dict:
             runner_command,
             args.timezone,
         )
-        graph_result = apply_naver_place_fallback(graph_result, reservation_target, runner_command, args.timezone)
+        graph_result = align_place_with_reservation_target(
+            graph_result,
+            reservation_target,
+            runner_command,
+            args.timezone,
+            force=executor in {"naver-visible", "naver-headless"},
+        )
         return serialize_graph_result(graph_result, payload, reservation_target)
     finally:
         if temp_calendar_path:
@@ -332,6 +338,9 @@ def serialize_graph_result(graph_result: dict, payload: dict, reservation_target
         "reference_date_error": graph_result.get("reference_date_error"),
         "reservation_target": reservation_target,
         "selected_date": payload.get("selected_date"),
+        "place_search_query": graph_result.get("place_search_query"),
+        "place_search_query_source": graph_result.get("place_search_query_source"),
+        "place_search_query_reason": graph_result.get("place_search_query_reason"),
         "pipeline_steps": build_pipeline_steps(graph_result, payload, reservation_target),
         "extraction": graph_result["extraction"].model_dump() if graph_result.get("extraction") else None,
         "recommendation": graph_result["recommendation"].model_dump() if graph_result.get("recommendation") else None,
@@ -345,42 +354,38 @@ def serialize_graph_result(graph_result: dict, payload: dict, reservation_target
     }
 
 
-def apply_naver_place_fallback(
+def align_place_with_reservation_target(
     graph_result: dict,
     reservation_target: str,
     runner_command: str,
     timezone: str,
+    *,
+    force: bool = False,
 ) -> dict:
-    reservation_result = graph_result.get("reservation_result")
-    if reservation_result and reservation_result.status != "skipped":
+    if not _is_external_reservation_target(reservation_target):
         return graph_result
     if not graph_result.get("extraction") or not graph_result.get("recommendation"):
         return graph_result
     if not graph_result["recommendation"].selected:
         return graph_result
 
+    current_place = graph_result.get("place_recommendation")
+    current_url = ""
+    if current_place and current_place.selected:
+        current_url = current_place.selected.source_url or ""
+    if not force and _same_url(current_url, reservation_target):
+        return graph_result
+
+    target_place = place_from_reservation_target(
+        reservation_target,
+        graph_result["extraction"].location_preference,
+    )
     fallback_place = PlaceRecommendation(
-        query="네이버 예약 URL",
+        query=target_place.name,
         status="selected",
-        selected=PlaceCandidate(
-            name="카페 온더힐",
-            address="서울 동작구 상도로 369 숭실대입구역 근처",
-            category="cafe",
-            source_url=reservation_target,
-            availability_hint="네이버 예약 페이지로 확인",
-            score=1.0,
-        ),
-        candidates=[
-            PlaceCandidate(
-                name="카페 온더힐",
-                address="서울 동작구 상도로 369 숭실대입구역 근처",
-                category="cafe",
-                source_url=reservation_target,
-                availability_hint="네이버 예약 페이지로 확인",
-                score=1.0,
-            )
-        ],
-        summary="네이버 예약 URL이 지정되어 해당 장소를 예약 target으로 사용합니다.",
+        selected=target_place,
+        candidates=[target_place],
+        summary="ShowUI가 열 예약 target과 동일한 장소 후보를 사용합니다.",
     )
     executor = executor_from_name("showui", target=reservation_target, runner_command=runner_command)
     reservation = reserve_selected_place(
@@ -401,6 +406,56 @@ def apply_naver_place_fallback(
     updated["reservation_result"] = reservation
     updated["reply_draft"] = reply
     return updated
+
+
+def place_from_reservation_target(
+    reservation_target: str,
+    location_preference: str | None = None,
+) -> PlaceCandidate:
+    parsed = urlparse(reservation_target)
+    query_params = parse_qs(parsed.query)
+    search_text = _first_query_value(query_params, "searchText")
+    place_id = _naver_place_id(parsed.path)
+    name = search_text or _clean_location_preference(location_preference) or "네이버 예약 페이지 선택 장소"
+    if place_id and search_text:
+        name = f"{search_text} 예약 장소"
+    elif place_id:
+        name = f"네이버 예약 장소 {place_id}"
+
+    return PlaceCandidate(
+        name=name,
+        address=None,
+        category="naver_booking",
+        source_url=reservation_target,
+        availability_hint="ShowUI가 실제 예약 target 페이지에서 확인",
+        score=10.0,
+    )
+
+
+def _is_external_reservation_target(target: str) -> bool:
+    parsed = urlparse(target)
+    return parsed.scheme in {"http", "https"} and "map.naver.com" in parsed.netloc
+
+
+def _same_url(left: str, right: str) -> bool:
+    return left.rstrip("/") == right.rstrip("/") if left and right else False
+
+
+def _first_query_value(query_params: dict[str, list[str]], name: str) -> str:
+    values = query_params.get(name) or []
+    return values[0].strip() if values and values[0].strip() else ""
+
+
+def _naver_place_id(path: str) -> str:
+    match = re.search(r"/place/(\d+)", path)
+    return match.group(1) if match else ""
+
+
+def _clean_location_preference(location_preference: str | None) -> str:
+    if not location_preference:
+        return ""
+    cleaned = location_preference.strip().rstrip(".")
+    return cleaned.removeprefix("장소는").strip()
 
 
 def apply_email_location_override(
@@ -429,7 +484,12 @@ def apply_email_location_override(
 
     extraction = graph_result["extraction"].model_copy(update={"location_preference": location_hint})
     provider = provider_from_name(place_provider, html_path=str(PROJECT_ROOT / place_search_html))
-    place_recommendation = recommend_place(extraction, graph_result["recommendation"], provider=provider)
+    place_recommendation = recommend_place(
+        extraction,
+        graph_result["recommendation"],
+        provider=provider,
+        query_override=graph_result.get("place_search_query"),
+    )
     executor = executor_from_name("showui", target=reservation_target, runner_command=runner_command)
     reservation = reserve_selected_place(
         extraction,
@@ -505,7 +565,7 @@ def build_pipeline_steps(graph_result: dict, payload: dict, reservation_target: 
         {
             "name": "Place retrieval",
             "status": place.status if place else "skipped",
-            "detail": place.selected.name if place and place.selected else "",
+            "detail": graph_result.get("place_search_query") or (place.selected.name if place and place.selected else ""),
         },
         {"name": "Reservation target", "status": "ready", "detail": reservation_target},
         {
