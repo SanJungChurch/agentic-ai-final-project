@@ -4,8 +4,11 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .json_utils import parse_json_object
+from .prompting import build_reply_generation_prompt
 from .schema import ExtractionResult, PlaceRecommendation, ReplyDraft, ReservationResult, ScheduleRecommendation
 
 
@@ -79,6 +82,32 @@ def generate_reply_draft(
         status=draft_status,
         rationale=selected.reasons,
     )
+
+
+def generate_reply_draft_with_llm(
+    extraction: ExtractionResult,
+    recommendation: ScheduleRecommendation | None,
+    *,
+    place_recommendation: PlaceRecommendation | None = None,
+    reservation_result: ReservationResult | None = None,
+    timezone: str = "Asia/Seoul",
+    generate_text: Callable[[str], str],
+) -> ReplyDraft:
+    prompt = build_reply_generation_prompt(
+        extraction_json=extraction.model_dump_json(),
+        recommendation_json=recommendation.model_dump_json() if recommendation else None,
+        place_recommendation_json=place_recommendation.model_dump_json() if place_recommendation else None,
+        reservation_result_json=reservation_result.model_dump_json() if reservation_result else None,
+        timezone=timezone,
+    )
+    data = parse_json_object(generate_text(prompt))
+    status = str(data.get("status") or "ready")
+    subject = str(data.get("subject") or "Re: 일정 조율")
+    body = str(data.get("body") or "").strip()
+    rationale = [str(item) for item in data.get("rationale", []) if str(item).strip()]
+    if not body:
+        raise ValueError("LLM reply generation returned an empty body.")
+    return ReplyDraft(subject=subject, body=body, status=status, rationale=rationale)
 
 
 def _format_time_range(start: str, end: str, timezone: str) -> str:

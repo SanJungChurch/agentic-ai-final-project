@@ -208,6 +208,13 @@ class KakaoLocalPlaceProvider:
             raise ValueError("KAKAO_REST_API_KEY is missing. Add it to .env or set the environment variable.")
 
     def search(self, query: str, *, location_hint: str | None = None) -> list[PlaceCandidate]:
+        for candidate_query in _kakao_query_variants(query):
+            documents = self._search_documents(candidate_query)
+            if documents:
+                return [self._from_document(item) for item in documents]
+        return []
+
+    def _search_documents(self, query: str) -> list[dict[str, Any]]:
         params = {
             "query": query,
             "size": str(self.size),
@@ -230,7 +237,7 @@ class KakaoLocalPlaceProvider:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Kakao Local API request failed: {exc.reason}") from exc
 
-        return [self._from_document(item) for item in payload.get("documents", [])]
+        return payload.get("documents", [])
 
     def _from_document(self, item: dict[str, Any]) -> PlaceCandidate:
         category = item.get("category_group_name") or item.get("category_name")
@@ -344,6 +351,10 @@ def _demo_area(normalized: str) -> str:
         return "홍대"
     if "판교" in normalized or "pangyo" in normalized:
         return "판교"
+    if "한양" in normalized or "hanyang" in normalized:
+        return "한양대"
+    if "건대" in normalized or "건국" in normalized or "konkuk" in normalized:
+        return "건대"
     if "숭실" in normalized or "soongsil" in normalized:
         return "숭실대"
     return "주변"
@@ -356,9 +367,69 @@ def _demo_address(area: str) -> str | None:
         return "서울 마포구 와우산로 일대"
     if area == "판교":
         return "경기 성남시 분당구 판교역로 일대"
+    if area == "한양대":
+        return "서울 성동구 왕십리로 한양대 일대"
+    if area == "건대":
+        return "서울 광진구 능동로 건대입구역 일대"
     if area == "숭실대":
         return "서울 동작구 상도로 일대"
     return None
+
+
+def _kakao_query_variants(query: str) -> list[str]:
+    base = " ".join((query or "").split())
+    if not base:
+        return []
+
+    variants = [base]
+    relaxed = base
+    for token in ["예약가능", "예약 가능", "예약", "장소"]:
+        relaxed = relaxed.replace(token, " ")
+    relaxed = " ".join(relaxed.split())
+    if relaxed and relaxed not in variants:
+        variants.append(relaxed)
+
+    compact = (
+        relaxed.replace("대학교", "대")
+        .replace("인문캠퍼스", "")
+        .replace("자연캠퍼스", "")
+    )
+    compact = " ".join(compact.split())
+    if compact and compact not in variants:
+        variants.append(compact)
+
+    if "회의실" in compact:
+        meeting_query = compact.replace("회의실", "회의")
+        meeting_query = " ".join(meeting_query.split())
+        if meeting_query and meeting_query not in variants:
+            variants.append(meeting_query)
+
+    area = _known_korean_area(compact or relaxed or base)
+    if area and area not in variants:
+        variants.append(area)
+
+    return variants
+
+
+def _known_korean_area(query: str) -> str:
+    for area in [
+        "명지대",
+        "명지대학교",
+        "숭실대",
+        "한양대",
+        "건대",
+        "강남역",
+        "강남",
+        "홍대",
+        "판교",
+        "서울대",
+        "신촌",
+        "잠실",
+        "사당",
+    ]:
+        if area in query:
+            return "명지대" if area == "명지대학교" else area
+    return ""
 
 
 def _naver_search_url(query: str) -> str:

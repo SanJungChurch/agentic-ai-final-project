@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Any, Callable, TypedDict
 
-from .extractor import extract_constraints, parse_email_thread
+from .extractor import parse_email_thread
 from .json_utils import parse_json_object
 from .llm_extractor import create_constraint_extractor
 from .place_retriever import provider_from_name, recommend_place
 from .prompting import build_place_search_prompt
 from .reservation_executor import executor_from_name, reserve_selected_place
-from .reply_generator import generate_reply_draft
+from .reply_generator import generate_reply_draft_with_llm
 from .schema import (
     EmailThread,
     ExtractionResult,
@@ -20,6 +20,9 @@ from .schema import (
 )
 from .scheduling import load_calendar, recommend_time
 from .time_normalizer import normalize_extraction_times
+
+
+EXAONE_FALLBACK_ATTEMPTS = 3
 
 
 class ExtractionGraphState(TypedDict, total=False):
@@ -40,6 +43,7 @@ class ExtractionGraphState(TypedDict, total=False):
     reservation_provider: str | None
     reservation_html: str | None
     reservation_target: str | None
+    reservation_target_source: str | None
     reservation_target_auto: bool
     showui_runner_command: str | None
     thread: EmailThread
@@ -50,6 +54,7 @@ class ExtractionGraphState(TypedDict, total=False):
     reply_draft: ReplyDraft
     provider: str
     error: str
+    primary_llm_error: str
 
 
 def build_extraction_graph():
@@ -63,7 +68,6 @@ def build_extraction_graph():
     graph.add_node("parse_email", parse_email_node)
     graph.add_node("infer_reference_date", infer_reference_date_node)
     graph.add_node("llm_extract", llm_extract_node)
-    graph.add_node("rule_fallback", rule_fallback_node)
     graph.add_node("normalize_times", normalize_times_node)
     graph.add_node("schedule", schedule_node)
     graph.add_node("retrieve_places", retrieve_places_node)
@@ -73,15 +77,7 @@ def build_extraction_graph():
     graph.add_edge(START, "parse_email")
     graph.add_edge("parse_email", "infer_reference_date")
     graph.add_edge("infer_reference_date", "llm_extract")
-    graph.add_conditional_edges(
-        "llm_extract",
-        should_fallback,
-        {
-            "fallback": "rule_fallback",
-            "done": "normalize_times",
-        },
-    )
-    graph.add_edge("rule_fallback", "normalize_times")
+    graph.add_edge("llm_extract", "normalize_times")
     graph.add_edge("normalize_times", "schedule")
     graph.add_edge("schedule", "retrieve_places")
     graph.add_edge("retrieve_places", "reserve_place")
@@ -96,50 +92,114 @@ def parse_email_node(state: ExtractionGraphState) -> ExtractionGraphState:
     return {**state, "thread": thread}
 
 
+def should_try_primary_provider(state: ExtractionGraphState) -> bool:
+    provider = (state.get("llm_provider") or "").strip()
+    if not provider:
+        return False
+    selected = provider.lower()
+    if selected in {"exaone", "lgai-exaone", "transformers", "hf", "huggingface"}:
+        return False
+    if selected.startswith("exaone:"):
+        return False
+    if provider.startswith("LGAI-EXAONE/") or provider.startswith("lgai-exaone/"):
+        return False
+    return True
+
+
+def create_exaone_extractor(state: ExtractionGraphState):
+    model = state.get("llm_model")
+    if model and "EXAONE" in model.upper():
+        return create_constraint_extractor("exaone", model=model)
+    return create_constraint_extractor("exaone")
+
+
+def run_with_exaone_fallback(
+    state: ExtractionGraphState,
+    description: str,
+    operation: Callable[[Any], Any],
+    *,
+    allow_none: bool = False,
+    attempts: int = EXAONE_FALLBACK_ATTEMPTS,
+) -> tuple[Any, Any]:
+    errors: list[str] = []
+    for attempt in range(1, attempts + 1):
+        try:
+            extractor = create_exaone_extractor(state)
+            result = operation(extractor)
+            if result is None and not allow_none:
+                raise ValueError("EXAONE returned no usable result.")
+            return result, extractor
+        except Exception as exc:
+            errors.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+    raise TimeoutError(f"{description} failed after {attempts} EXAONE attempts. {' | '.join(errors)}")
+
+
 def infer_reference_date_node(state: ExtractionGraphState) -> ExtractionGraphState:
     reference_date = (state.get("reference_date") or "").strip()
     if reference_date and reference_date.lower() != "auto":
         return {**state, "reference_date": reference_date, "reference_date_source": "user"}
 
     try:
-        extractor = create_graph_extractor(state)
-        inferred = extractor.infer_reference_date(
-            state["thread"],
-            timezone=state.get("timezone", "Asia/Seoul"),
+        inferred, extractor = run_with_exaone_fallback(
+            state,
+            "reference date inference",
+            lambda candidate: candidate.infer_reference_date(
+                state["thread"],
+                timezone=state.get("timezone", "Asia/Seoul"),
+            ),
+            allow_none=False,
         )
-        if inferred:
-            return {
-                **state,
-                "reference_date": inferred,
-                "reference_date_source": f"{extractor.provider_name}_inferred",
-                "llm_model": extractor.model_name,
-            }
-        return {**state, "reference_date": None, "reference_date_source": "not_found", "llm_model": extractor.model_name}
+        return {
+            **state,
+            "reference_date": inferred,
+            "reference_date_source": f"{extractor.provider_name}_inferred",
+            "llm_model": extractor.model_name,
+        }
     except Exception as exc:
         return {**state, "reference_date": None, "reference_date_source": "failed", "reference_date_error": str(exc)}
 
 
 def llm_extract_node(state: ExtractionGraphState) -> ExtractionGraphState:
     provider = state.get("llm_provider")
+    primary_error = None
     try:
-        extractor = create_graph_extractor(state)
-        result = extractor.extract(
-            state["thread"],
-            reference_date=state.get("reference_date"),
-            timezone=state.get("timezone", "Asia/Seoul"),
-        )
-        return {**state, "extraction": result, "provider": extractor.provider_name, "llm_model": extractor.model_name}
+        if should_try_primary_provider(state):
+            extractor = create_graph_extractor(state)
+            result = extractor.extract(
+                state["thread"],
+                reference_date=state.get("reference_date"),
+                timezone=state.get("timezone", "Asia/Seoul"),
+            )
+            return {**state, "extraction": result, "provider": extractor.provider_name, "llm_model": extractor.model_name}
     except Exception as exc:
+        primary_error = exc
+
+    try:
+        result, extractor = run_with_exaone_fallback(
+            state,
+            "constraint extraction",
+            lambda candidate: candidate.extract(
+                state["thread"],
+                reference_date=state.get("reference_date"),
+                timezone=state.get("timezone", "Asia/Seoul"),
+            ),
+            allow_none=False,
+        )
+        updated = {**state, "extraction": result, "provider": extractor.provider_name, "llm_model": extractor.model_name}
+        if primary_error:
+            updated["primary_llm_error"] = f"{type(primary_error).__name__}: {primary_error}"
+        return updated
+    except TimeoutError as exc:
         failed_provider = (provider or "exaone").lower()
-        return {**state, "error": str(exc), "provider": f"{failed_provider}_failed"}
-
-
-def rule_fallback_node(state: ExtractionGraphState) -> ExtractionGraphState:
-    result = extract_constraints(state["thread"])
-    return {**state, "extraction": result, "provider": "rule_fallback"}
+        error = f"TimeoutError: {exc}"
+        if primary_error:
+            error += f"; primary_error={type(primary_error).__name__}: {primary_error}"
+        return {**state, "error": error, "provider": f"{failed_provider}_timeout"}
 
 
 def normalize_times_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    if state.get("error"):
+        return state
     extraction = state.get("extraction")
     if not extraction:
         return state
@@ -158,6 +218,8 @@ def normalize_times_node(state: ExtractionGraphState) -> ExtractionGraphState:
 
 
 def schedule_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    if state.get("error"):
+        return state
     calendar_path = state.get("calendar_path")
     extraction = state.get("extraction")
     if not calendar_path or not extraction:
@@ -165,12 +227,21 @@ def schedule_node(state: ExtractionGraphState) -> ExtractionGraphState:
 
     try:
         adjusted_extraction = apply_selected_date_to_candidates(extraction, state.get("selected_date"))
+        extractor = create_exaone_extractor(state)
         recommendation = recommend_time(
             adjusted_extraction,
             load_calendar(calendar_path),
             preferred_date=state.get("selected_date"),
+            email_thread=state.get("thread"),
+            llm_text_generator=extractor.generate_text,
+            llm_required=True,
         )
-        return {**state, "extraction": adjusted_extraction, "recommendation": recommendation}
+        return {
+            **state,
+            "extraction": adjusted_extraction,
+            "recommendation": recommendation,
+            "llm_model": extractor.model_name,
+        }
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; scheduling failed: {exc}" if previous_error else f"scheduling failed: {exc}"
@@ -209,12 +280,14 @@ def apply_selected_date_to_candidates(
 
 
 def retrieve_places_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    if state.get("error"):
+        return state
     extraction = state.get("extraction")
     if not extraction:
         return state
 
     try:
-        provider_name = state.get("place_provider") or ("html" if state.get("place_search_html") else "mock")
+        provider_name = state.get("place_provider") or "kakao"
         provider = provider_from_name(provider_name, html_path=state.get("place_search_html"))
         place_query, query_source, query_reason = generate_place_search_query(state)
         if place_query is None:
@@ -231,14 +304,16 @@ def retrieve_places_node(state: ExtractionGraphState) -> ExtractionGraphState:
                     summary=query_reason,
                 ),
             }
+        extraction_for_place = align_location_with_place_query(extraction, place_query)
         place_recommendation = recommend_place(
-            extraction,
+            extraction_for_place,
             state.get("recommendation"),
             provider=provider,
             query_override=place_query,
         )
         return {
             **state,
+            "extraction": extraction_for_place,
             "place_search_query": place_query,
             "place_search_query_source": query_source,
             "place_search_query_reason": query_reason,
@@ -256,8 +331,8 @@ def generate_place_search_query(state: ExtractionGraphState) -> tuple[str | None
         return None, "missing_extraction", "추출 결과가 없습니다."
 
     recommendation = state.get("recommendation")
-    try:
-        extractor = create_graph_extractor(state)
+
+    def plan_with_exaone(extractor) -> tuple[str | None, str, str]:
         prompt = build_place_search_prompt(
             state["thread"],
             extraction.model_dump_json(),
@@ -265,17 +340,48 @@ def generate_place_search_query(state: ExtractionGraphState) -> tuple[str | None
         )
         data = parse_json_object(extractor.generate_text(prompt))
         if data.get("needs_place_search") is False:
-            return None, getattr(extractor, "provider_name", "llm"), str(data.get("reason") or "물리적 장소 검색이 필요 없습니다.")
+            return None, getattr(extractor, "provider_name", "llm"), str(data.get("reason") or "")
         query = str(data.get("search_query") or "").strip()
         if query:
             return query, getattr(extractor, "provider_name", "llm"), str(data.get("reason") or "")
-    except Exception:
-        pass
+        raise ValueError("EXAONE place planner returned an empty search_query.")
 
-    fallback = infer_place_search_query(extraction)
-    if fallback:
-        return fallback, "heuristic_fallback", "LLM 장소 검색어 생성 실패 또는 빈 응답으로 heuristic query를 사용했습니다."
-    return None, "heuristic_fallback", "장소 검색이 필요하거나 가능한지 판단할 정보가 부족합니다."
+    result, _extractor = run_with_exaone_fallback(
+        state,
+        "place search planning",
+        plan_with_exaone,
+        allow_none=False,
+    )
+    return result
+
+
+def align_location_with_place_query(extraction: ExtractionResult, place_query: str | None) -> ExtractionResult:
+    query = (place_query or "").strip()
+    if not query:
+        return extraction
+    query_area = _known_area(query)
+    current_area = _known_area(extraction.location_preference or "")
+    if query_area and query_area != current_area:
+        return extraction.model_copy(update={"location_preference": query})
+    if query_area and not (extraction.location_preference or "").strip():
+        return extraction.model_copy(update={"location_preference": query})
+    return extraction
+
+
+def _known_area(text: str) -> str:
+    lowered = text.lower()
+    for area, aliases in {
+        "한양대": ["한양대", "한양", "hanyang"],
+        "숭실대": ["숭실대", "숭실", "soongsil"],
+        "건대": ["건대", "건국대", "konkuk"],
+        "명지대": ["명지대", "명지대학교", "myongji"],
+        "강남역": ["강남역", "강남", "gangnam"],
+        "홍대": ["홍대", "hongdae"],
+        "판교": ["판교", "pangyo"],
+    }.items():
+        if any(alias in lowered for alias in aliases):
+            return area
+    return ""
 
 
 def infer_place_search_query(extraction: ExtractionResult) -> str:
@@ -313,9 +419,9 @@ def infer_place_search_query(extraction: ExtractionResult) -> str:
 
 
 def _location_area_from_text(text: str) -> str:
-    for area in ["숭실대", "강남역", "강남", "홍대", "판교", "서울대", "신촌", "잠실", "사당"]:
+    for area in ["명지대", "명지대학교", "숭실대", "강남역", "강남", "홍대", "판교", "서울대", "신촌", "잠실", "사당"]:
         if area.lower() in text:
-            return area
+            return "명지대" if area == "명지대학교" else area
     return ""
 
 
@@ -327,6 +433,8 @@ def _clean_location_text(value: str | None) -> str:
 
 
 def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    if state.get("error"):
+        return state
     extraction = state.get("extraction")
     if not extraction:
         return state
@@ -346,7 +454,12 @@ def reserve_place_node(state: ExtractionGraphState) -> ExtractionGraphState:
             state.get("place_recommendation"),
             executor=executor,
         )
-        return {**state, "reservation_target": reservation_target, "reservation_result": reservation_result}
+        return {
+            **state,
+            "reservation_target": reservation_target,
+            "reservation_target_source": resolve_reservation_target_source(state),
+            "reservation_result": reservation_result,
+        }
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; reservation failed: {exc}" if previous_error else f"reservation failed: {exc}"
@@ -365,31 +478,49 @@ def resolve_reservation_target(state: ExtractionGraphState) -> str | None:
     return target or selected_url
 
 
+def resolve_reservation_target_source(state: ExtractionGraphState) -> str | None:
+    target = state.get("reservation_target")
+    place_recommendation = state.get("place_recommendation")
+    selected_url = None
+    if place_recommendation and place_recommendation.selected:
+        selected_url = place_recommendation.selected.source_url
+
+    if state.get("reservation_target_auto") and selected_url:
+        provider = state.get("place_provider") or "place"
+        return f"{provider}_selected_place"
+    if target:
+        return "provided_or_inferred_target"
+    if selected_url:
+        return "selected_place"
+    return None
+
+
 def generate_reply_node(state: ExtractionGraphState) -> ExtractionGraphState:
+    if state.get("error"):
+        return state
     extraction = state.get("extraction")
     if not extraction:
         return state
 
     try:
-        draft = generate_reply_draft(
-            extraction,
-            state.get("recommendation"),
-            place_recommendation=state.get("place_recommendation"),
-            reservation_result=state.get("reservation_result"),
-            timezone=state.get("timezone", "Asia/Seoul"),
+        draft, extractor = run_with_exaone_fallback(
+            state,
+            "reply generation",
+            lambda candidate: generate_reply_draft_with_llm(
+                extraction,
+                state.get("recommendation"),
+                place_recommendation=state.get("place_recommendation"),
+                reservation_result=state.get("reservation_result"),
+                timezone=state.get("timezone", "Asia/Seoul"),
+                generate_text=candidate.generate_text,
+            ),
+            allow_none=False,
         )
-        return {**state, "reply_draft": draft}
+        return {**state, "reply_draft": draft, "llm_model": extractor.model_name}
     except Exception as exc:
         previous_error = state.get("error")
         error = f"{previous_error}; reply generation failed: {exc}" if previous_error else f"reply generation failed: {exc}"
         return {**state, "error": error}
-
-
-def should_fallback(state: ExtractionGraphState) -> Literal["fallback", "done"]:
-    if state.get("error") or not state.get("extraction"):
-        return "fallback"
-    return "done"
-
 
 def create_graph_extractor(state: ExtractionGraphState):
     return create_constraint_extractor(

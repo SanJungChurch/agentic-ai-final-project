@@ -4,8 +4,10 @@ import argparse
 import json
 from datetime import datetime, time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from .json_utils import parse_json_object
+from .prompting import build_time_optimization_prompt
 from .schema import (
     CalendarEvent,
     CandidateDecision,
@@ -28,6 +30,10 @@ def recommend_time(
     calendar_data: dict[str, Any],
     *,
     preferred_date: str | None = None,
+    email_thread: Any | None = None,
+    llm_text_generator: Callable[[str], str] | None = None,
+    llm_required: bool = False,
+    llm_retry_limit: int = 3,
 ) -> ScheduleRecommendation:
     candidates = build_time_candidates(extraction)
     if not candidates:
@@ -47,7 +53,18 @@ def recommend_time(
     valid_decisions = [decision for decision in decisions if decision.valid]
     preferred_decisions = _filter_by_preferred_date(valid_decisions, preferred_date)
     selected_pool = preferred_decisions or valid_decisions
-    selected = max(selected_pool, key=lambda item: item.score) if selected_pool else None
+    selected = _select_candidate_with_llm(
+        selected_pool,
+        extraction,
+        calendar_data,
+        preferred_date=preferred_date,
+        email_thread=email_thread,
+        llm_text_generator=llm_text_generator,
+        required=llm_required,
+        retry_limit=llm_retry_limit,
+    )
+    if not selected and not llm_required:
+        selected = max(selected_pool, key=lambda item: item.score) if selected_pool else None
 
     if selected:
         if preferred_decisions:
@@ -65,6 +82,66 @@ def recommend_time(
         status="no_valid_candidate",
         summary="모든 후보 시간이 hard constraint를 위반했습니다.",
     )
+
+
+def _select_candidate_with_llm(
+    selected_pool: list[CandidateDecision],
+    extraction: ExtractionResult,
+    calendar_data: dict[str, Any],
+    *,
+    preferred_date: str | None,
+    email_thread: Any | None,
+    llm_text_generator: Callable[[str], str] | None,
+    required: bool = False,
+    retry_limit: int = 3,
+) -> CandidateDecision | None:
+    if not selected_pool:
+        return None
+    if not llm_text_generator or not email_thread:
+        if required:
+            raise TimeoutError("time optimization failed because EXAONE text generation was not available.")
+        return None
+
+    candidate_payload = [
+        {
+            "index": index,
+            "candidate": decision.candidate.model_dump(),
+            "heuristic_score": decision.score,
+            "hard_violations": decision.hard_violations,
+            "rule_reasons": decision.reasons,
+        }
+        for index, decision in enumerate(selected_pool)
+    ]
+    prompt = build_time_optimization_prompt(
+        email_thread=email_thread,
+        extraction_json=extraction.model_dump_json(),
+        candidates=candidate_payload,
+        calendar_json=json.dumps(calendar_data, ensure_ascii=False, indent=2),
+        preferred_date=preferred_date,
+    )
+    errors: list[str] = []
+    for attempt in range(1, retry_limit + 1):
+        try:
+            data = parse_json_object(llm_text_generator(prompt))
+            selected_index = int(data.get("selected_index"))
+            if selected_index < 0 or selected_index >= len(selected_pool):
+                raise ValueError(f"selected_index out of range: {selected_index}")
+            selected = selected_pool[selected_index]
+            llm_reasons = [str(item) for item in data.get("reasons", []) if str(item).strip()]
+            llm_summary = str(data.get("summary") or "").strip()
+            reasons = selected.reasons + [f"LLM 최적화: {reason}" for reason in llm_reasons[:3]]
+            if llm_summary:
+                reasons.append(f"LLM 요약: {llm_summary}")
+            score = int(data.get("score", selected.score))
+            return selected.model_copy(update={"score": score, "reasons": reasons})
+        except Exception as exc:
+            errors.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+
+    if required:
+        raise TimeoutError(
+            f"time optimization failed after {retry_limit} EXAONE attempts. {' | '.join(errors)}"
+        )
+    return None
 
 
 def _filter_by_preferred_date(

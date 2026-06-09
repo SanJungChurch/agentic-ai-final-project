@@ -1,6 +1,6 @@
 import unittest
 
-from src.email_agent.reply_generator import generate_reply_draft
+from src.email_agent.reply_generator import generate_reply_draft, generate_reply_draft_with_llm
 from src.email_agent.schema import (
     CandidateDecision,
     ExtractionResult,
@@ -119,6 +119,34 @@ class ReplyGeneratorTest(unittest.TestCase):
 
         self.assertEqual(draft.status, "needs_clarification")
         self.assertIn("가능한 날짜와 시간대", draft.body)
+
+    def test_generate_reply_with_llm_uses_model_json(self) -> None:
+        extraction = ExtractionResult(
+            intent=Intent.SCHEDULE_MEETING,
+            participants=["주정인", "박수민"],
+            location_preference="한양대 식당 예약",
+        )
+        recommendation = ScheduleRecommendation(
+            status="selected",
+            selected=CandidateDecision(
+                candidate=TimeCandidate(
+                    source_expression="오후 4시",
+                    start="2026-06-11T16:00:00+09:00",
+                    end="2026-06-11T17:00:00+09:00",
+                ),
+                valid=True,
+                score=88,
+            ),
+        )
+
+        draft = generate_reply_draft_with_llm(
+            extraction,
+            recommendation,
+            generate_text=lambda _prompt: '{"subject":"Re: 약속","body":"예약은 완료되지 않아 직접 예약 확인이 필요합니다.","status":"reservation_failed","rationale":["예약 실패 반영"]}',
+        )
+
+        self.assertEqual(draft.status, "reservation_failed")
+        self.assertIn("직접 예약", draft.body)
 
 
 if __name__ == "__main__":

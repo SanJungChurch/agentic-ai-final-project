@@ -1,12 +1,12 @@
 import unittest
+from unittest.mock import patch
 
 from scripts.serve_html_demo import (
+    DEFAULT_NAVER_BOOKING_URL,
     answer_chat,
     group_gmail_messages,
-    infer_location_query,
-    infer_naver_url,
-    place_from_reservation_target,
     split_appointment_contexts,
+    sync_reservation_target_from_place,
 )
 
 
@@ -45,43 +45,67 @@ class HtmlDemoServerTest(unittest.TestCase):
         self.assertEqual(contexts[0]["title"], "A")
         self.assertEqual(contexts[1]["title"], "B")
 
-    def test_place_from_reservation_target_uses_naver_url(self) -> None:
-        url = (
-            "https://map.naver.com/p/search/%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98/"
-            "place/1649187599?placePath=/booking&searchText=%EC%88%AD%EC%8B%A4%EB%8C%80%20%EC%B9%B4%ED%8E%98"
+    def test_default_reservation_target_is_generic_until_agent_runs(self) -> None:
+        self.assertIn("%EC%98%88%EC%95%BD%20%EA%B0%80%EB%8A%A5", DEFAULT_NAVER_BOOKING_URL)
+        self.assertNotIn("%EC%88%AD%EC%8B%A4%EB%8C%80", DEFAULT_NAVER_BOOKING_URL)
+        self.assertNotIn("%EB%AA%85%EC%A7%80%EB%8C%80", DEFAULT_NAVER_BOOKING_URL)
+
+    def test_sync_reservation_target_prefers_kakao_selected_place_url(self) -> None:
+        from src.email_agent.schema import PlaceCandidate, PlaceRecommendation
+
+        initial_target = "https://map.naver.com/p/search/%ED%99%8D%EB%8C%80%20%EC%8B%9D%EB%8B%B9%20%EC%98%88%EC%95%BD"
+        kakao_selected_url = (
+            "https://map.naver.com/p/search/%EC%84%A0%ED%83%9D%EB%90%9C%20%ED%99%8D%EB%8C%80%20%EC%8B%9D%EB%8B%B9"
+            "%20%EC%84%9C%EC%9A%B8%20%EB%A7%88%ED%8F%AC%EA%B5%AC%20%EC%98%88%EC%95%BD"
+        )
+        graph_result = {
+            "reservation_target": initial_target,
+            "place_recommendation": PlaceRecommendation(
+                query="홍대 식당 예약",
+                status="selected",
+                selected=PlaceCandidate(
+                    name="선택된 홍대 식당",
+                    address="서울 마포구",
+                    source_url=kakao_selected_url,
+                ),
+            ),
+        }
+
+        updated, target = sync_reservation_target_from_place(
+            graph_result,
+            initial_target,
+            True,
+            "kakao",
         )
 
-        place = place_from_reservation_target(url, "숭실대 근처 카페")
+        self.assertEqual(target, kakao_selected_url)
+        self.assertEqual(updated["reservation_target"], kakao_selected_url)
+        self.assertEqual(updated["reservation_target_source"], "kakao_selected_place")
 
-        self.assertEqual(place.source_url, url)
-        self.assertIn("숭실대 카페", place.name)
-        self.assertEqual(place.category, "naver_booking")
-
-    def test_infer_naver_url_uses_venue_type_from_email(self) -> None:
-        text = "숭실대 근처 음식점에서 점심 약속을 잡아줘"
-
-        self.assertIn("%EC%8B%9D%EB%8B%B9", infer_naver_url(text))
-        self.assertEqual(infer_location_query(text), "숭실대 식당 예약")
-
-    def test_chat_answers_reservation_failure_from_context_without_llm(self) -> None:
-        answer = answer_chat(
-            {
-                "question": "reservation status?",
-                "llm_provider": "qwen",
-                "context": {
-                    "reservation_result": {
-                        "status": "failed",
-                        "failure_reason": "slot_unavailable",
-                        "message": "No matching reservation slot was found.",
+    def test_chat_uses_exaone_response_without_context_fallback(self) -> None:
+        with patch("scripts.serve_html_demo.create_constraint_extractor") as factory:
+            extractor = factory.return_value
+            extractor.provider_name = "exaone"
+            extractor.model_name = "LGAI-EXAONE/EXAONE-4.0-1.2B"
+            extractor.generate_text.return_value = "EXAONE answer"
+            answer = answer_chat(
+                {
+                    "question": "reservation status?",
+                    "llm_provider": "qwen",
+                    "context": {
+                        "reservation_result": {
+                            "status": "failed",
+                            "failure_reason": "slot_unavailable",
+                            "message": "No matching reservation slot was found.",
+                        },
+                        "extraction": {"participants": ["A", "B"]},
                     },
-                    "extraction": {"participants": ["A", "B"]},
-                },
-            }
-        )
+                }
+            )
 
-        self.assertEqual(answer["source"], "context")
-        self.assertIn("실패했습니다", answer["answer"])
-        self.assertIn("slot_unavailable", answer["answer"])
+        factory.assert_called_once()
+        self.assertEqual(answer["source"], "exaone")
+        self.assertEqual(answer["answer"], "EXAONE answer")
 
 
 if __name__ == "__main__":

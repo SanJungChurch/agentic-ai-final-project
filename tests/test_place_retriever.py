@@ -129,6 +129,15 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertEqual(study_room[0].category, "study room")
         self.assertEqual(meeting_room[0].category, "meeting room")
 
+    def test_demo_provider_keeps_hanyang_restaurant_query(self) -> None:
+        provider = DemoPlaceProvider()
+
+        candidates = provider.search("한양대 식당 예약")
+
+        self.assertEqual(candidates[0].name, "한양대 예약 식당")
+        self.assertIn("%ED%95%9C%EC%96%91%EB%8C%80", candidates[0].source_url)
+        self.assertNotIn("%EC%88%AD%EC%8B%A4%EB%8C%80", candidates[0].source_url)
+
     def test_kakao_provider_parses_documents(self) -> None:
         payload = {
             "documents": [
@@ -163,6 +172,45 @@ class PlaceRetrieverTest(unittest.TestCase):
         self.assertEqual(candidates[0].category, "카페")
         self.assertTrue(candidates[0].source_url.startswith("https://map.naver.com/p/search/"))
         self.assertIn("%EC%B9%B4%ED%8E%98%20%ED%85%8C%EC%8A%A4%ED%8A%B8", candidates[0].source_url)
+
+    def test_kakao_provider_relaxes_too_narrow_query(self) -> None:
+        empty_payload = {"documents": []}
+        recovered_payload = {
+            "documents": [
+                {
+                    "place_name": "홀릭스터디카페 역북라운지",
+                    "road_address_name": "경기 용인시 처인구 명지로40번길 8",
+                    "category_group_name": "스터디카페",
+                }
+            ]
+        }
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                import json
+
+                return json.dumps(self.payload).encode("utf-8")
+
+        responses = [FakeResponse(empty_payload), FakeResponse(recovered_payload)]
+
+        def fake_urlopen(request, timeout):
+            return responses.pop(0)
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            provider = KakaoLocalPlaceProvider(api_key="test-key")
+            candidates = provider.search("명지대 회의실 예약")
+
+        self.assertEqual(candidates[0].name, "홀릭스터디카페 역북라운지")
+        self.assertIn("%ED%99%80%EB%A6%AD%EC%8A%A4%ED%84%B0%EB%94%94%EC%B9%B4%ED%8E%98", candidates[0].source_url)
 
 
 if __name__ == "__main__":
